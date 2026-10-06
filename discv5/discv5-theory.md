@@ -814,20 +814,74 @@ the service-centred key space.
 ### Lookup Procedure
 
 A discoverer looking for service `s` queries registrars selected from its search table `B(s)`. The
-corresponding wire-format request is specified in [TOPICQUERY]. Lookup proceeds bucket by bucket,
-starting from the bucket furthest from `s` and progressing towards buckets closer to `s`. For each
-bucket `bᵢ(s)`, the discoverer selects candidate registrars from that bucket and queries up to
-`K_lookup` of them.
+corresponding wire-format request is specified in [TOPICQUERY]. The discoverer maintains an active
+search bucket. Search-bucket index `0` is the farthest from `s`; increasing indices move closer to
+`s`. These indices order the search buckets from far to close and are distinct from the logarithmic
+topic-distances used on the wire. A new lookup starts with active index `0`. If that bucket is
+empty, the first query selects a registrar from the farthest populated search region using the
+fallback rule below.
+
+While a search pass remains active, each query first selects an eligible unqueried registrar from
+the active bucket. If none is available there, the discoverer considers other buckets in increasing
+absolute index distance from the active bucket. At equal distance, it considers the farther bucket
+first: `active - d` before `active + d`, skipping invalid indices. It selects an eligible unqueried
+registrar from the first bucket with a candidate. There is no random choice across multiple buckets.
+
+For each processed query outcome that counts as a response, the discoverer records one yield sample
+for the responding registrar's bucket: the number of valid advertisement ENRs accepted from that
+query's [TOPICNODES] responses, after validation, the response cap, and advertiser-ID deduplication
+within the response. The sample includes accepted ENRs even if they fail the subsequent
+TopDisc-capability check. Capability filtering, result-history filtering, and source mixing affect
+which results are delivered to the caller and do not reduce the yield sample. A successful empty
+response contributes `0`. A partial response containing accepted advertiser or auxiliary ENRs also
+contributes a sample. A failed request with neither advertiser nor auxiliary results contributes no
+sample.
+
+During a search pass, each bucket retains its four most recent yield samples. A response does not
+change the active bucket until the responding bucket has at least two samples. Let `x` be those
+samples sorted in ascending order, and `m` their count, where `2 <= m <= 4`. With zero-based indexing
+and integer division:
+
+    lower = x[(m - 1) / 2]
+    upper = x[m / 2]
+
+For odd `m`, `lower == upper` is the ordinary median. For even `m`, they are the two middle values
+and are not averaged. Let `F = SearchYieldFloor` and `T = F_return`, the maximum advertisements
+returned by one query. Their current values are `F = 8` and `T = 16`. For responding bucket index
+`b` and closest search-bucket index `last`, update the active bucket as follows:
+
+    if lower >= T:
+        active = max(0, b - 1)
+    else if upper >= F:
+        active = b
+    else if upper == 0:
+        active = min(last, b + 4)
+    else:
+        jump = ceil(log2(F / upper))
+        active = min(last, b + min(jump, 4))
+
+The division in `F / upper` is real division. The first case moves one bucket farther; the second
+stays at the responding bucket; the remaining cases move at most four buckets closer. All moves
+are clamped to valid bucket indices. Adaptation is relative to the bucket that produced the
+response, not necessarily the previously active bucket. A fallback response can therefore change
+the active bucket once its own bucket has enough samples.
+
+Once the active bucket has at least two yield samples and no unqueried candidate, the pass ends
+instead of selecting another fallback. If no unqueried candidates remain anywhere, at most one
+available previously queried registrar is retried in that pass. If the pass exhausts all candidates
+without meeting the active-bucket condition above, the next pass starts one bucket closer, clamped
+at the closest bucket. Otherwise the active index is retained. Ending a pass does not end the
+overall lookup, and each new pass starts with fresh yield samples.
 
 A registrar returns advertisements for service `s` in [TOPICNODES] responses. The discoverer
 validates the returned advertisements, extracts the advertised ENRs, and de-duplicates them by
-advertiser identity. Advertisements are candidate results for the target service. The lookup
-terminates when the discoverer has collected enough distinct advertisers for its local or
-service-specific purpose, or when no unqueried registrars remain. This local target is denoted
-`F_lookup` in this document. The value of `F_lookup` is determined by the application, service
-binding, or local implementation policy, rather than by the TopDisc lookup procedure itself. If
-fewer than `F_lookup` advertisers are found before all available candidate registrars are exhausted,
-the lookup returns the valid advertisers collected so far.
+advertiser identity. Advertisements are candidate results for the target service. The caller may
+stop lookup when it has collected enough distinct advertisers for its local or service-specific
+purpose. This target is denoted `F_lookup` in this document and is determined by the application,
+service binding, or local implementation policy. It is a caller-side result target, not a
+search-bucket progression parameter, and has no protocol-wide fixed default. A caller stopping
+before reaching its target retains the valid advertisers collected so far. The search iterator
+continues through successive passes until the caller closes it or the discovery system shuts down.
 
 The same registrar should not be queried repeatedly during a single lookup unless the implementation
 has exhausted other candidates and chooses to retry according to local policy. If a queried
@@ -848,7 +902,7 @@ and auxiliary ENRs using the response format defined for `TOPICQUERY` in the wir
 
 The registrar MUST NOT return expired advertisements. If more than `F_return` advertisements for the
 service are present in its ad cache, the registrar SHOULD return a pseudo-random subset of at most
-`Freturn` advertisements. The selection procedure SHOULD avoid deterministic bias towards the same
+`F_return` advertisements. The selection procedure SHOULD avoid deterministic bias towards the same
 advertisers across repeated lookup requests.
 
 A registrar may also return auxiliary ENRs selected from its view of the service table for `s`.
@@ -862,7 +916,15 @@ wire-format document.
 
 ### Updating the Search Table During Lookup
 
-The discoverer updates `B(s)` using auxiliary ENRs returned in lookup responses.
+The discoverer updates `B(s)` using auxiliary ENRs returned in [NODES] responses to lookup requests.
+These ENRs are registrar candidates for the search table, not advertisement lookup results.
+
+During adaptive lookup, [TOPICQUERY] requests auxiliary candidates for topic-distances corresponding
+to search buckets around the current active bucket. `SearchAuxRadius` controls this neighbourhood;
+its current value is `1`. The request therefore normally includes the active bucket and its
+neighbouring search buckets, subject to valid indices and available capacity. A bucket has space
+when it holds fewer than `SearchBucketSize` candidates. This replenishes registrar candidates in
+the service-distance region that adaptive lookup currently prefers.
 
 An ENR learned through lookup is eligible for insertion into `B(s)` only if:
 
@@ -879,17 +941,24 @@ asynchronously.
 
 The TopDisc algorithms use the following parameters:
 
-| Parameter    | Meaning                                                                | Default   |
-|--------------|------------------------------------------------------------------------|-----------|
-| `K_register` | Target number of active or pending registrations per bucket            | `5`       |
-| `K_lookup`   | Maximum number of registrar queries per bucket during lookup           | `5`       |
-| `F_return`   | Maximum number of advertisements returned by one registrar             | `10`      |
-| `F_lookup`   | Target for the number of distinct advertisers to collect during lookup | `30`      |
-| `E`          | Advertisement expiry duration                                          | `15 min`  |
-| `C`          | Registrar ad cache capacity                                            | `1000`    |
-| `δ`          | Registration retry window duration                                     | **`TBD`** |
-| `Pocc`       | Occupancy exponent in the waiting-time function                        | `10`      |
-| `G`          | Safety constant in the waiting-time function                           | `10^-7`   |
+| Parameter          | Meaning                                                                       | Default        |
+|--------------------|-------------------------------------------------------------------------------|----------------|
+| `K_register`       | Target number of active or pending registrations per bucket                   | `5`            |
+| `F_return`         | Maximum number of advertisements returned for one topic query                 | `16`           |
+| `F_lookup`         | Caller/application-defined target number of distinct advertiser results       | Caller-defined |
+| `SearchBucketSize` | Maximum candidate capacity of one search bucket                               | `8`            |
+| `SearchYieldFloor` | Yield threshold for staying at the responding bucket instead of moving closer | `8`            |
+| `SearchAuxRadius`  | Neighbourhood around the active bucket for auxiliary registrar requests       | `1`            |
+| `E`                | Advertisement expiry duration                                                 | `15 min`       |
+| `C`                | Registrar ad cache capacity                                                   | `1000`         |
+| `δ`                | Registration retry window duration                                            | **`TBD`**      |
+| `Pocc`             | Occupancy exponent in the waiting-time function                               | `10`           |
+| `G`                | Safety constant in the waiting-time function                                  | `10^-7`        |
+
+`SearchYieldFloor` is compared with the upper middle sample; the full-response condition using
+`F_return` and the lower middle sample takes precedence. `SearchYieldFloor` and `SearchAuxRadius`
+denote algorithm values here; the current Go implementation fixes them at `8` and `1`, respectively,
+rather than exposing configuration options.
 
 ## Implementation Considerations
 

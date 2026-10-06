@@ -378,15 +378,13 @@ The following performance goals are specific to TopDisc service discovery.
 Lookup should be able to find advertisements without immediately concentrating requests at
 the nodes closest to the topic identifier.
 
-TopDisc lookup starts from buckets far from the topic identifier and progresses towards
-buckets closer to it. In each bucket, the discoverer queries up to `K_lookup` registrars.
-This allows popular topics to be discovered before reaching the closest buckets, reducing
-hotspots near the topic identifier.
+TopDisc lookup begins in search buckets far from the service identifier and adapts its
+preferred distance according to observed advertisement availability. Sparse responses
+move lookup closer, where advertiser placements and discoverer queries are more likely to
+overlap. Consistently full responses permit lookup to move farther away.
 
-For less popular topics, lookup can continue toward buckets closer to the topic
-identifier, where advertisers and discoverers are more likely to overlap. This provides a
-structured search process while avoiding the cost of blind random sampling across the
-whole discovery network.
+The goal is to spread lookup load across the service-centred key space while retaining
+the ability to converge toward the service identifier for less widely advertised services.
 
 ### Efficient Discovery for Small Topics
 
@@ -472,10 +470,12 @@ location.
 A malicious actor may attempt to make discoverers of a target topic receive only
 advertisements for malicious nodes.
 
-TopDisc reduces the effectiveness of this attack by requiring discoverers to collect
-advertisements from multiple registrars and by encouraging diversity in registrar ad
-caches. Parameters such as `F_lookup`, `F_return`, `K_lookup`, and `K_register` control
-the trade-off between lookup cost and diversity of sources.
+Using advertisements from multiple registrars and encouraging diversity in registrar ad
+caches can reduce the effectiveness of this attack. Distributed placements and registrar
+selection provide opportunities for source diversity; lookup does not enforce a minimum
+number of distinct responding registrars. `F_return` limits one registrar's response, and
+`K_register` controls placement multiplicity. The caller's `F_lookup` target counts distinct
+advertisers and does not itself guarantee diversity of registrar sources.
 
 ### Service-Table Poisoning
 
@@ -540,11 +540,29 @@ adversary could generate node IDs close to a chosen topic identifier and attempt
 control advertisement storage or lookup results for that topic.
 
 TopDisc therefore does not rely only on the closest nodes to a topic identifier.
-Advertisers maintain placements across buckets of a topic-centred table. Discoverers query
-registrars starting from buckets far from the topic identifier and progress towards
-buckets closer to it, querying up to `Klookup` registrars per bucket. This keeps discovery
-distributed while still ensuring that advertiser and discoverer walks converge toward the
-topic identifier when more search effort is needed.
+Advertisers maintain placements across buckets of a topic-centred table, distributing
+advertisements across the key space. Discovery begins farther from the service identifier
+and moves closer as observed advertisement availability decreases. The preferred distance
+is selected by [adaptive search](#why-use-adaptive-search).
+
+## Why Use Adaptive Search?
+
+Always searching close to the service identifier offers high advertisement availability,
+but concentrates lookup traffic and trust on a relatively small registrar population.
+Remaining too far away distributes load, but can make sparse services difficult to
+discover. A fixed number of queries at every distance cannot adapt to differing service
+popularity and the current distribution of advertisements.
+
+Adaptive search observes advertisement yield from registrar queries and adjusts the
+preferred service-distance region. Low yield moves search closer; adequate yield keeps it
+at the responding distance; consistently full responses allow it to move farther away.
+The intended effect is to operate as far from the service identifier as advertisement
+availability reasonably permits, spreading load while retaining the ability to discover
+sparse services.
+
+Load distribution and discovery time depend on the workload and selected values. These
+design goals do not guarantee fewer queries or lower latency for every service or
+deployment.
 
 ## Why Topic-Centered Service Tables?
 
@@ -708,6 +726,11 @@ When a request includes topic-distances where the requester has free space, the 
 returns at most one auxiliary ENR per requested distance. This keeps responses compact and
 avoids overrepresenting a single bucket. It also limits the ability of a malicious
 responder to flood the requester’s service table with many ENRs from one distance.
+
+During adaptive lookup, the requester preferentially asks for auxiliary registrar
+candidates around the active search bucket. `SearchAuxRadius`, currently `1`, determines
+this neighbourhood, subject to available capacity. This replenishes candidates in the
+region of the service-centred key space that the search currently considers useful.
 
 ## Why Support Mixed Deployments?
 
