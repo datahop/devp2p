@@ -378,8 +378,8 @@ The following performance goals are specific to TopDisc service discovery.
 Lookup should be able to find advertisements without immediately concentrating requests at
 the nodes closest to the topic identifier.
 
-TopDisc lookup begins in search buckets far from the service identifier and adapts its
-preferred distance according to observed advertisement availability. Sparse responses
+The [TopDisc lookup procedure] begins in search buckets far from the service identifier and
+adapts its preferred distance according to observed advertisement availability. Sparse responses
 move lookup closer, where advertiser placements and discoverer queries are more likely to
 overlap. Consistently full responses permit lookup to move farther away.
 
@@ -392,37 +392,34 @@ Topic discovery should remain efficient even when the target topic is advertised
 small fraction of nodes in the global discovery network.
 
 Random sampling over the ordinary node discovery network is robust, but it may require
-many probes before finding enough peers for a rare topic. TopDisc reduces this cost by
-allowing advertisers to place topic advertisements at registrars and allowing discoverers
-to query registrars selected from topic-centred service tables.
+many probes before finding enough peers for a rare topic. TopDisc reduces this cost through [advertisement placement] at registrars and by allowing
+discoverers to query registrars selected from [service tables].
 
 ### Bounded Registrar Storage
 
 A registrar should be able to bound the amount of memory it dedicates to topic discovery.
-TopDisc addresses this through a bounded ad cache with capacity `C`. Advertisements are
-soft state and expire after duration `E`, so storage is reclaimed automatically unless
-advertisers renew their advertisements.
+TopDisc addresses this through a bounded [ad cache]. Advertisements are soft state and
+expire, so storage is reclaimed automatically unless advertisers renew their advertisements.
 
 ### Stateless Registration Operations
 
 A registrar should not be required to store any state for advertisers waiting to be
-admitted. TopDisc uses tickets to carry pending-registration state back to the advertiser.
-The registrar can validate a returning advertiser using the ticket, without keeping
-per-request state for every pending registration attempt.
+admitted. TopDisc uses [tickets] to carry pending-registration state back to the advertiser.
+This allows the registrar to validate a later retry without keeping per-request state
+for every pending registration attempt.
 
 ### Compact Responses
 
-TopDisc responses should remain small enough for UDP-based discovery. Advertisements
-returned by a registrar are capped by `F_return`. Auxiliary ENRs are selected with an
-implementation-defined total cap, and the recommended selection rule returns at most one
-auxiliary ENR per requested topic-distance. This keeps responses compact while still
-helping requesters improve their service tables.
+TopDisc responses should remain small enough for UDP-based discovery. The [lookup response]
+and [auxiliary ENR selection] rules bound the advertisements and auxiliary routing
+information returned to a requester. This keeps responses compact while still allowing
+requesters to improve their service tables.
 
 ### Incremental Service-Table Improvement
 
 A node should be able to start TopDisc operations before it has a complete service table
-for a topic. A service table is soft state. It is initially derived from the ordinary node
-table and then refined using auxiliary ENRs returned by TopDisc responses. This allows
+for a topic. As described in [service tables], a service table is soft state. It is initially derived
+from the ordinary node table and can subsequently be refined using [auxiliary ENRs]. This allows
 lookup and advertisement placement to begin with partial knowledge and improve over time.
 
 ## Service Discovery Security Goals
@@ -436,8 +433,7 @@ A malicious advertiser may attempt to fill registrar ad caches with its own
 advertisements, or with advertisements for services it controls, so that honest
 advertisements are delayed or excluded.
 
-TopDisc mitigates this attack by using bounded ad caches and waiting-time-based admission
-control. Advertisements that increase cache occupancy or reduce cache diversity receive
+TopDisc mitigates this attack using the bounded [ad cache] and [admission control]. Advertisements that increase cache occupancy or reduce cache diversity receive
 longer waiting times.
 
 ### Registrar Resource Exhaustion
@@ -446,8 +442,7 @@ A malicious node may send many registration attempts, retries, or malformed requ
 attempt to exhaust registrar memory, CPU, or bandwidth.
 
 TopDisc mitigates memory exhaustion by avoiding unbounded per-request registrar state for
-pending registrations. Pending registration state is carried by advertisers in
-registrar-authenticated tickets. Registrars may also apply local rate limits, request
+pending registrations. Pending registration state is carried by advertisers using [tickets]. Registrars may also apply local rate limits, request
 validation, and temporary exclusion policies for nodes that repeatedly fail TopDisc
 operations.
 
@@ -460,10 +455,9 @@ This may be attempted by flooding registrars with competing advertisements, by r
 incomplete or misleading lookup responses, or by trying to control nodes in parts of the
 key space relevant to a topic.
 
-TopDisc mitigates this risk by distributing advertisement placement across the
-topic-centred key space, by using multiple registrars, and by allowing discoverers to
-query registrars across multiple buckets rather than relying on a single topic-specific
-location.
+TopDisc mitigates this risk through distributed [advertisement placement] across the
+topic-centred key space and through the [TopDisc lookup procedure], which can query
+registrars across multiple buckets rather than relying on a single topic-specific location.
 
 ### Service Eclipse
 
@@ -473,9 +467,10 @@ advertisements for malicious nodes.
 Using advertisements from multiple registrars and encouraging diversity in registrar ad
 caches can reduce the effectiveness of this attack. Distributed placements and registrar
 selection provide opportunities for source diversity; lookup does not enforce a minimum
-number of distinct responding registrars. `F_return` limits one registrar's response, and
-`K_register` controls placement multiplicity. The caller's `F_lookup` target counts distinct
-advertisers and does not itself guarantee diversity of registrar sources.
+number of distinct responding registrars. The [lookup response] limits how much one registrar can return, while
+[advertisement placement] distributes advertisements across multiple registrars. The
+lookup result target counts distinct advertisers and does not itself guarantee diversity
+of registrar sources.
 
 ### Service-Table Poisoning
 
@@ -484,7 +479,7 @@ to pollute the requester's service table.
 
 Implementations mitigate this by validating returned ENRs, requiring a supported TopDisc
 capability before inserting nodes into service tables, applying ordinary Node Discovery v5
-liveness checks, and temporarily excluding nodes that repeatedly fail TopDisc operations.
+liveness checks, and temporarily excluding nodes that repeatedly fail TopDisc operations (see [service-table update rules]).
 Auxiliary ENRs are routing information, not lookup results, and should not be treated as
 proof that a node participates in the requested topic.
 
@@ -540,10 +535,10 @@ adversary could generate node IDs close to a chosen topic identifier and attempt
 control advertisement storage or lookup results for that topic.
 
 TopDisc therefore does not rely only on the closest nodes to a topic identifier.
-Advertisers maintain placements across buckets of a topic-centred table, distributing
-advertisements across the key space. Discovery begins farther from the service identifier
-and moves closer as observed advertisement availability decreases. The preferred distance
-is selected by [adaptive search](#why-use-adaptive-search).
+[Advertisement placement] distributes advertisements across the service-centred key space,
+while the [TopDisc lookup procedure] can adapt the distance from which registrars are
+queried. The rationale for that adaptation is discussed in
+[adaptive search](#why-use-adaptive-search).
 
 ## Why Use Adaptive Search?
 
@@ -553,16 +548,30 @@ Remaining too far away distributes load, but can make sparse services difficult 
 discover. A fixed number of queries at every distance cannot adapt to differing service
 popularity and the current distribution of advertisements.
 
-Adaptive search observes advertisement yield from registrar queries and adjusts the
-preferred service-distance region. Low yield moves search closer; adequate yield keeps it
-at the responding distance; consistently full responses allow it to move farther away.
-The intended effect is to operate as far from the service identifier as advertisement
-availability reasonably permits, spreading load while retaining the ability to discover
-sparse services.
+The [TopDisc lookup procedure] records the advertisement yield of each registrar query, defined as
+the number of valid, de-duplicated advertisements obtained from the registrar's
+response. Each yield sample is associated with the service-distance bucket containing
+the queried registrar.
 
-Load distribution and discovery time depend on the workload and selected values. These
-design goals do not guarantee fewer queries or lower latency for every service or
-deployment.
+As specified by the [TopDisc lookup procedure], once enough yield samples have been
+collected for a bucket, they are used to choose the next search bucket. Let `lower` and `upper` denote the lower and
+upper middle samples after sorting the observed yields.
+
+If `lower >= F_return`, registrars in the bucket are consistently returning full
+responses, so the search moves one bucket farther from the service identifier.
+Otherwise, if `upper >= SearchYieldFloor`, the search continues in the same bucket.
+
+When `upper < SearchYieldFloor`, the search moves towards buckets closer to the service
+identifier. For a non-zero yield, the number of buckets moved is:
+
+    ceil(log2(SearchYieldFloor / upper))
+
+with the movement limited to four buckets. If `upper = 0`, the search moves up to four
+buckets closer to the service identifier.
+
+The adaptive rule therefore moves closer when the current bucket provides too few
+advertisements, remains at the current distance when its yield is sufficient, and moves
+slightly farther away when registrars are consistently returning full responses.
 
 ## Why Topic-Centered Service Tables?
 
@@ -571,7 +580,7 @@ global discovery network and for finding nodes close to arbitrary node IDs. For 
 discovery, however, advertisers and discoverers need a shared reference point: the topic
 identifier.
 
-A service table is centred on the topic identifier rather than on the local node ID. This
+A [service table] is centred on the topic identifier rather than on the local node ID. This
 gives advertisers and discoverers for the same topic a compatible view of the key space.
 An advertiser uses the service table to choose registrars for advertisement placement. A
 discoverer uses the service table to choose registrars for lookup.
@@ -581,8 +590,8 @@ discovery state and refined using auxiliary ENRs returned by TopDisc responses.
 
 ## Why Use Registrars?
 
-A registrar is a TopDisc-capable node that stores admitted advertisements and returns them
-to discoverers.
+The TopDisc [node roles] define registrars as the nodes that store admitted advertisements
+and return them to discoverers.
 
 Registrars decouple advertisers from discoverers. Advertisers do not need to be online at
 the exact moment a discoverer performs a lookup, as long as their advertisements remain
@@ -595,8 +604,8 @@ central registry or trusted topic-specific bootstrap node.
 
 ## Why Use an Ad Cache?
 
-A registrar stores admitted advertisements in an ad cache. The ad cache has bounded
-capacity, and each advertisement expires after a fixed duration. The fixed advertisement
+Registrars store admitted advertisements in a bounded [ad cache], where advertisements
+are maintained as expiring soft state. The fixed advertisement
 lifetime gives advertisers predictable soft state. Once admitted, an advertisement remains
 available. Advertisers can therefore schedule renewal rather than continuously
 re-registering at every moment.
@@ -605,9 +614,9 @@ The cache bounds registrar storage and makes advertisements soft state. Advertis
 renew or replace advertisements over time, which allows the system to adapt to churn,
 failures, and changes in service participation.
 
-The ad cache is separate from the service table. The service table is used to select
-registrars for registration and lookup. The ad cache is the registrar's local storage of
-advertisements that can be returned to discoverers.
+The [ad cache] and [service table] serve different purposes: the former stores
+advertisements at a registrar, while the latter provides the service-centred view used
+to select registrars.
 
 ## Why Use Admission Control?
 
@@ -615,8 +624,8 @@ Registrars have finite storage. If every registration request were admitted imme
 popular topics or malicious advertisers could dominate the ad cache and crowd out other
 advertisements.
 
-TopDisc uses admission control to decide when an advertisement may enter the cache.
-Admission is based on a waiting-time function. Advertisements that would increase cache
+TopDisc [admission control] uses a [waiting-time function] to regulate when an
+advertisement may enter the cache. Advertisements that would increase cache
 occupancy or reduce diversity receive longer waiting times.
 
 This makes flooding more expensive, promotes diversity across topics and IP prefixes, and
@@ -624,7 +633,7 @@ helps ensure that less popular topics can still obtain representation in registr
 
 ## Why Should Advertisers Wait?
 
-Waiting time is the registrar's main admission-control mechanism.
+The [waiting-time function] is the registrar's main admission-control mechanism.
 
 The waiting time makes it costly to flood registrars with advertisements, limits the rate
 at which the ad cache fills, and gives the registrar a way to prefer advertisements that
@@ -638,7 +647,8 @@ the cost of waiting before advertisements are admitted.
 
 ## Why Use Tickets?
 
-Tickets allow a registrar to enforce waiting without storing unbounded per-request state.
+The [ticket mechanism] allows a registrar to enforce waiting without storing unbounded
+per-request state.
 
 A ticket records the advertisement binding and registrar-generated timing information
 needed to show that the advertiser has waited. The ticket is carried by the advertiser and
@@ -667,8 +677,8 @@ justify it.
 
 ## Why Include Service Similarity?
 
-The service-similarity component increases waiting time when the incoming advertisement is
-for a topic that is already well represented in the registrar's ad cache.
+The [waiting-time function] includes a service-similarity component that accounts for how
+well represented the advertised topic already is in the registrar's ad cache.
 
 This prevents popular topics from crowding out less represented topics. It also helps less
 popular topics obtain cache entries even when the total registration demand is high.
@@ -679,8 +689,8 @@ A malicious actor may create many node identities from a small number of physica
 IP prefixes. Counting only node IDs would not distinguish this behaviour from a diverse
 set of independent advertisers.
 
-The IP-similarity component increases waiting time for advertisements whose IP prefixes
-are already overrepresented in the cache. This discourages a small number of IP prefixes
+The [IP similarity tree] provides the IP-similarity component used by the
+[waiting-time function] to enforce diversity among advertiser addresses. This discourages a small number of IP prefixes
 from dominating the ad cache.
 
 This approach is more flexible than a fixed rule such as "only one node per prefix". Fixed
@@ -693,7 +703,8 @@ increases.
 If an advertisement is for an underrepresented topic and comes from an underrepresented IP
 prefix, the service-similarity and IP-similarity components may both be small.
 
-The safety constant ensures that the waiting time does not become zero in such cases. This
+The safety constant in the [waiting-time function] ensures that the waiting time does not
+become zero in such cases. This
 provides a baseline admission cost and helps prevent the ad cache from being filled too
 quickly by advertisements that appear diverse only because they use random topic
 identifiers or diverse IP prefixes.
@@ -704,8 +715,8 @@ If waiting times could decrease freely as the ad cache changes, advertisers woul
 incentivised to repeatedly request new tickets in the hope of obtaining a shorter wait.
 This would create unnecessary traffic and processing load.
 
-The lower-bound mechanism ensures that a new waiting time cannot improve on a previous
-waiting time by more than the elapsed time. It removes the incentive to repeatedly request
+The [waiting-time lower bound] ensures that a new waiting time cannot improve on a
+previous waiting time by more than the elapsed time. It removes the incentive to repeatedly request
 new tickets while keeping registrar state bounded.
 
 The lower-bound state is maintained only for bounded structures, such as topics already
@@ -722,15 +733,16 @@ tables. Returned ENRs are auxiliary routing information, not lookup results.
 Implementations must validate them and check TopDisc capability in the ENR before
 inserting them into service tables.
 
-When a request includes topic-distances where the requester has free space, the responder
-returns at most one auxiliary ENR per requested distance. This keeps responses compact and
-avoids overrepresenting a single bucket. It also limits the ability of a malicious
-responder to flood the requester’s service table with many ENRs from one distance.
+When a request includes topic-distances for which the requester needs additional
+candidates, the responder returns at most one auxiliary ENR for each requested distance.
+This keeps responses compact and limits the amount of routing information contributed
+for any one requested distance.
 
-During adaptive lookup, the requester preferentially asks for auxiliary registrar
-candidates around the active search bucket. `SearchAuxRadius`, currently `1`, determines
-this neighbourhood, subject to available capacity. This replenishes candidates in the
-region of the service-centred key space that the search currently considers useful.
+During lookup, auxiliary candidates are requested for topic-distances
+corresponding to the active search bucket and nearby buckets with available capacity.
+With `SearchAuxRadius = 1`, this normally covers the active bucket and its immediate
+neighbours. This helps replenish registrar candidates near the part of the
+service-centred key space currently being searched.
 
 ## Why Support Mixed Deployments?
 
@@ -788,3 +800,35 @@ handle TopDisc messages.
 [wire protocol]: ./discv5-wire.md
 [node records]: ../enr.md
 [TopDisc]: ./discv5-theory.md#topic-based-service-discovery
+
+[TopDisc lookup procedure]: ./discv5-theory.md#lookup-procedure
+
+[advertisement placement]: ./discv5-theory.md#advertisement-placement
+
+[service tables]: ./discv5-theory.md#service-tables
+
+[ad cache]: ./discv5-theory.md#ad-cache
+
+[tickets]: ./discv5-theory.md#tickets
+
+[lookup response]: ./discv5-theory.md#lookup-responses
+
+[auxiliary ENR selection]: ./discv5-theory.md#auxiliary-enr-selection
+
+[auxiliary ENRs]: ./discv5-theory.md#auxiliary-enr-selection
+
+[admission control]: ./discv5-theory.md#admission-control
+
+[service-table update rules]: ./discv5-theory.md#updating-the-search-table-during-lookup
+
+[service table]: ./discv5-theory.md#service-tables
+
+[node roles]: ./discv5-theory.md#node-roles
+
+[waiting-time function]: ./discv5-theory.md#waiting-time-function
+
+[ticket mechanism]: ./discv5-theory.md#tickets
+
+[IP similarity tree]: ./discv5-theory.md#ip-similarity-tree
+
+[waiting-time lower bound]: ./discv5-theory.md#waiting-time-lower-bound
