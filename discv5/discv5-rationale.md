@@ -739,10 +739,10 @@ handle TopDisc messages.
 
 - Xin Sun, Ruben Torres and Sanjay Rao. *Feasiblity of DDoS Attacks with P2P Systems and
   Prevention through Robust Membership Management.* 2007.\
-  <https://docs.lib.purdue.edu/cgi/viewcontent.cgi?article=1357&context=ecetr>
+  <https://docs.lib.purdue.edu/ecetr/361>
 
 - Erik Hjelmvik, Wolfgang John. *Breaking and Improving Protocol Obfuscation.* 2010.\
-  <https://internetstiftelsen.se/docs/hjelmvik_breaking.pdf>
+  <https://research.chalmers.se/en/publication/123751>
 
 - Adam Langley, Wan-Teh Chang. *QUIC Crypto*. 2016.\
   <https://docs.google.com/document/d/1g5nIXAIkN_Y-7XJW5K45IblHd_L2f5LTaDUDwvZ5L6g>
@@ -752,7 +752,7 @@ handle TopDisc messages.
 
 - Seoung Kyun Kim, Zane Ma, Siddharth Murali, Joshua Mason, Andrew Miller, Michael Bailey.
   *Measuring Ethereum Network Peers*. 2018.\
-  <http://mdbailey.ece.illinois.edu/publications/imc18_ethereum.pdf>
+  <https://faculty.cc.gatech.edu/~mbailey/publications/imc18_ethereum.pdf>
 
 - Yuval Marcus, Ethan Heilman, Sharon Goldberg.
   *Low-Resource Eclipse Attacks on Ethereum’s Peer-to-Peer Network.* 2018.\

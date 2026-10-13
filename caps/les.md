@@ -495,4 +495,4 @@ Update flow control buffer and allow sending requests again. Note that the reque
 [StopMsg]: #stopmsg-0x16
 [ResumeMsg]: #resumemsg-0x17
 [Ethereum Wire Protocol]: ./eth.md
-[Merkle Patricia Trie]: https://github.com/ethereum/wiki/wiki/Patricia-Tree
+[Merkle Patricia Trie]: https://ethereum.org/developers/docs/data-structures-and-encoding/patricia-merkle-trie
