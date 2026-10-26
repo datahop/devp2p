@@ -470,7 +470,8 @@ selection provide opportunities for source diversity; lookup does not enforce a 
 number of distinct responding registrars. The [lookup response] limits how much one registrar can return, while
 [advertisement placement] distributes advertisements across multiple registrars. The
 lookup result target counts distinct advertisers and does not itself guarantee diversity
-of registrar sources.
+of registrar sources. The lookup [mixes results](#why-filter-and-mix-lookup-results)
+across responding registrars, so that no single registrar decides a caller's first results.
 
 ### Service-Table Poisoning
 
@@ -549,9 +550,16 @@ discover. A fixed number of queries at every distance cannot adapt to differing 
 popularity and the current distribution of advertisements.
 
 The [TopDisc lookup procedure] records the advertisement yield of each registrar query, defined as
-the number of valid, de-duplicated advertisements obtained from the registrar's
-response. Each yield sample is associated with the service-distance bucket containing
+the number of valid, de-duplicated advertisement records in the registrar's response.
+Each yield sample is associated with the service-distance bucket containing
 the queried registrar.
+
+The sample counts the records as the registrar sent them, before the discoverer's own
+filtering. It measures how many advertisements registrars at that distance hold. Counting
+after the result filter would make a registrar look sparse once the discoverer had seen its
+advertisements, and would drive the search inward although the registrar is dense. A partial response counts
+only if it reaches `SearchYieldFloor`, because its count is a lower bound: it can show that
+a bucket is dense enough, but not that it is sparse.
 
 As specified by the [TopDisc lookup procedure], once enough yield samples have been
 collected for a bucket, they are used to choose the next search bucket. Let `lower` and `upper` denote the lower and
@@ -572,6 +580,72 @@ buckets closer to the service identifier.
 The adaptive rule therefore moves closer when the current bucket provides too few
 advertisements, remains at the current distance when its yield is sufficient, and moves
 slightly farther away when registrars are consistently returning full responses.
+
+The jump size follows from [advertisement placement]. Advertisers aim for the same number of
+registrations, `K_register`, in every bucket, while each bucket closer to the service
+identifier covers half as much of the key space and so holds about half as many registrars.
+Advertisements per registrar therefore roughly double with each bucket inward. A bucket
+yielding `upper` advertisements per query is about `log2(SearchYieldFloor / upper)` buckets
+farther out than the first bucket expected to reach the floor, so the search jumps there
+directly.
+
+The value of the floor matters less than having one. In a 10,000-node testbed run, a floor
+of 4 cut the maximum number of TOPICQUERY requests received by one registrar from 640,319
+with no floor to 16,710. In a 30,000-node simulation, floors of 2, 4 and 8 performed alike,
+with a maximum of 2,026 to 2,068 TOPICQUERY requests per registrar against 15,020 with no
+floor.
+
+A yield sample from a fallback bucket moves the active bucket only in the direction that
+advertisement density does not already predict. Low yield farther out than the active bucket,
+or sufficient yield closer in, is expected and says nothing about the active bucket. Sufficient
+yield farther out shows that the search can move out, and low yield closer in shows that it
+must move further in.
+
+## Why Search in Passes?
+
+A lookup has no natural end: the caller reads results for as long as it needs peers. The
+[TopDisc lookup procedure] therefore runs as a series of bounded passes, each starting from
+the bucket the previous one settled on. The cap of `SearchPassQueries` queries per pass
+bounds a pass even when auxiliary ENRs keep refilling the active bucket.
+
+Registrar ad caches change on the time scale of the advertisement lifetime `E`. Asking the
+same registrar again within that time mostly returns advertisements the discoverer already
+has, so the asked set keeps answered registrars out of later passes for `E`. One spare
+re-ask per pass, choosing the registrar asked longest ago, keeps a lookup going when every
+known registrar has been asked. The failed set keeps a dead node from the routing table from
+being picked again in every pass. A bucket whose queries all failed gets one retry pass, so
+that a single dead registrar cannot hold the search at one distance.
+
+When a lookup that started at the closest bucket sees no advertisements, the service may have
+had no advertisers when the lookup reached that bucket. Starting again at the farthest bucket
+lets the lookup find advertisers that appear later.
+
+Passes that find nothing new are spaced out, doubling from `SearchPassGap` up to
+`SearchPassBackoff`. In a 30,000-node simulation, a 60 s cap cut the 99th-percentile number
+of TOPICQUERY requests received per registrar from 1,423 without back-off to 1,143. For
+topics with 10 to 99 providers, it left t90, the time until a searcher has found 90 % of its
+topic's providers, unchanged; a 300 s cap about doubled t90.
+
+The discoverer stops sending queries while `SearchUnreadLimit` results wait unread. A caller
+that reads slowly then does not cause queries whose results it would not use.
+
+## Why Filter and Mix Lookup Results?
+
+Successive passes query different registrars, which often hold the same advertisers. The
+result filter keeps the caller from receiving the same advertiser again for an advertisement
+lifetime. An advertiser that changes its ENR is delivered once more, so the caller learns the
+new record, but only once, so that an advertiser cannot reach the caller repeatedly by
+updating its record.
+
+Without mixing, a pass would deliver the first registrar's whole response before any other
+registrar's results. A caller that stops after its first few results would then depend on a
+single registrar, which a malicious registrar could fill with sybil advertisements. Mixing
+holds results until several registrars have answered, or until a short wait has passed, and
+then delivers them one registrar at a time. In simulation (datahop/go-ethereum#140), mixing
+cut the share of searches whose first results were all sybils from 21 % to 0.15 %.
+
+A large `F_return` raises the eclipse risk. In simulation with 10 % sybil
+nodes, an `F_return` of 16 eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of 6.
 
 ## Why Topic-Centered Service Tables?
 

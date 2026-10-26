@@ -853,12 +853,55 @@ the observed advertisement yield, i.e., the number of advertisement ENRs returne
 registrars: low yield moves the active bucket closer to `s`, sufficient yield keeps it at the
 same distance, and consistently full responses move it farther from `s`.
 
+A lookup runs as a sequence of search passes. Each pass fills a fresh search table from the
+ordinary node table, starts at the active bucket chosen by the previous pass, and keeps its
+own yield samples. The discoverer sends one query at a time. The rules below for pass length,
+pass spacing, re-asking and result delivery are local policy: they do not change what is sent
+for a single query, but they set how much load a discoverer places on registrars. The values
+given are the recommended ones.
+
+#### Registrar Selection
+
 While a search pass remains active, each query first selects an eligible unqueried registrar from the active bucket. If none is available there, the discoverer considers neighbouring populated search buckets on either side of the active bucket, expanding outward one bucket at a time. When two candidate buckets are equally far from the active bucket, the bucket farther from `s` is considered first. The first bucket containing an eligible unqueried registrar is selected. Querying a registrar from such a fallback bucket does not itself change the active bucket. Therefore,
 the bucket containing the queried registrar may differ from the active bucket. The fallback is only
 a way to obtain another query target when the active bucket has no eligible registrar; the
 search region (active bucket) changes only in response to observed advertisement yield.
 
-For each processed query outcome that counts as a response, the discoverer records one advertisement-yield sample for the responding registrar's bucket. The advertisement-yield sample is the number of advertisement ENRs present in the processed [TOPICNODES] response after response validation, the response-size limit, and advertiser-ID deduplication within that response. A successful response containing no advertisements contributes a yield sample of `0`.
+Within a bucket, the discoverer SHOULD select the registrar pseudo-randomly, so that
+discoverers of the same service do not converge on the same registrars.
+
+The discoverer keeps two sets of registrars across the passes of a lookup. Each set holds a
+registrar for `E` from the time it was first added; adding it again does not extend that time.
+
+- The **asked set** holds registrars that answered a query. A registrar in the asked set is
+  not an unqueried candidate in later passes.
+- The **failed set** holds registrars whose query failed. A registrar in the failed set is
+  not inserted into the search table, from any source, until it leaves the set.
+
+A query fails when the registrar is unreachable, times out, or its response ends in an error
+before any record (advertisement or auxiliary ENR) has arrived. A failed registrar is removed
+from the search table. A response that ends in an error after some records have arrived is a
+partial response; the registrar counts as having answered.
+
+A registrar in the asked set that is offered to the search table again, from the node table
+or as an auxiliary ENR, becomes a spare. When no search bucket holds an unqueried candidate,
+the pass MAY re-ask one spare. The recommended choice is the spare whose last query is the
+oldest, since its ad cache is the most likely to have changed. At most one spare is re-asked
+per pass. A registrar that answered or failed during the current pass is not asked again in
+that pass.
+
+#### Advertisement Yield
+
+For each complete response, the discoverer records one advertisement-yield sample for the
+responding registrar's bucket. The sample is the number of advertisement records in the
+[TOPICNODES] responses after per-record validation, the `F_return` size limit and
+de-duplication by node ID within the response, and before the `ng` capability check and the
+result filter described below. A complete response containing no advertisements contributes
+a yield sample of `0`.
+
+A partial response contributes a yield sample only if its count reaches `F` on its own. Its
+count is a lower bound: it can show that yield is sufficient, but not that it is low. A failed
+query contributes no yield sample.
 
 During a search pass, each bucket retains its four most recent yield samples. A response does not change the active bucket until the responding bucket has at least two samples. Let `x` be those samples sorted in ascending order, and `m` their count, where `2 <= m <= 4`. With zero-based indexing and integer division:
 
@@ -869,50 +912,108 @@ For odd `m`, `lower == upper` is the ordinary median. For even `m`, they are the
 and are not averaged. Let `F = SearchYieldFloor`, the minimum advertisement yield considered sufficient to keep the
 responding bucket as the active bucket for subsequent queries. The current value is `F = 8`.
 `F_return = 16` is the maximum number of advertisement ENRs that a registrar may return in one
-query response. For responding bucket index `b` and closest search-bucket index `last`, update the
-active bucket as follows:
+query response. For responding bucket index `b` and closest search-bucket index `last`, compute
+the candidate bucket `next` as follows:
 
     if lower >= F_return:
-        active = max(0, b - 1)
+        next = max(0, b - 1)
     else if upper >= F:
-        active = b
+        next = b
     else if upper == 0:
-        active = min(last, b + 4)
+        next = min(last, b + 4)
     else:
         jump = ceil(log2(F / upper))
-        active = min(last, b + min(jump, 4))
+        next = min(last, b + min(jump, 4))
 
-The division in `F / upper` is real division. If the recent yield samples are consistently full (`lower >= F_return`), the active bucket moves one
+The division in `F / upper` is real division. If the recent yield samples are consistently full (`lower >= F_return`), the search moves one
 bucket farther from `s`. If the observed yield is sufficient but not consistently full
-(`upper >= F`), the responding bucket becomes the active bucket. If the yield is zero
-(`upper == 0`), the active bucket moves four buckets closer to `s`. Otherwise, when
+(`upper >= F`), the responding bucket is kept. If the yield is zero
+(`upper == 0`), the search moves four buckets closer to `s`. Otherwise, when
 `0 < upper < F`, it moves between one and four buckets closer, with lower yield causing a
-larger move. All moves are limited to valid bucket indices. The adaptation rule is applied to the bucket of the responding registrar, which may differ from the active bucket if the query used a fallback registrar. In that case, the response contributes a yield sample to the fallback bucket. Once that bucket has enough samples, the adaptation rule may make it, or a nearby bucket, the new active bucket.
+larger move. All moves are limited to valid bucket indices.
 
-Once the active bucket has at least two yield samples and no unqueried candidate, the pass ends
-instead of selecting another fallback. If no unqueried candidates remain in the active bucket or
-any fallback bucket, at most one previously queried registrar may be retried during that pass.
+The rule is evaluated on the samples of the responding registrar's bucket `b`, which differs
+from the active bucket `a` when the query used a fallback registrar. The active bucket becomes
+`next` only if one of the following holds:
 
-If the pass exhausts all candidates before the active bucket has accumulated enough yield samples
-for adaptation, the next pass starts one bucket closer to `s`, unless it is already the closest
-bucket. Otherwise, the same active bucket is retained.
+1. `b` is at most `SearchAuxRadius` buckets from `a`;
+2. `b` is farther from `s` than `a` (`b < a`) and `next <= b`; or
+3. `b` is closer to `s` than `a` (`b > a`) and `next > b`.
+
+Otherwise the sample is kept, but the active bucket does not change. Advertisement density
+grows toward `s`, so a distant fallback bucket can only move the search in one direction:
+sufficient yield farther out pulls the search out to that bucket or beyond, and low yield
+closer in pushes it past that bucket. Low yield farther out, or sufficient yield closer in, is
+what density alone predicts and does not move the active bucket.
+
+#### Pass Transitions
+
+A pass ends when no query is in flight, no result waits to be delivered, and one of the
+following holds:
+
+1. `SearchPassQueries` queries of the pass have completed, answered or failed (provisional,
+   see [Parameters](#parameters));
+2. the active bucket has no unqueried candidate and holds at least two yield samples; or
+3. no search bucket holds an unqueried candidate and no spare can be re-asked.
+
+The next pass starts at the active bucket if the pass ended by condition 1 or 2, or if a
+yield sample changed or confirmed the active bucket during the pass. Otherwise the pass ran
+out of candidates before the active bucket could decide, and the next pass starts one bucket
+closer to `s`, unless the active bucket is already the closest bucket. Two exceptions apply:
+
+- If the active bucket was queried during the pass, every query to it failed, and no yield
+  sample placed it, the next pass retries the same bucket. Only one such retry pass is made;
+  if it ends the same way, the following pass starts one bucket closer to `s`.
+- If the pass started at the closest bucket, would start the next pass there as well, and
+  received no advertisement from any registrar, the next pass starts at the farthest bucket,
+  index `0`. This lets a lookup find the first advertisers of a service that had none.
 
 Ending a pass does not end the overall lookup. The search continues with new passes, each starting
 with fresh yield samples, until the caller closes the lookup or the discovery system shuts down.
 
+Each pass starts at least `SearchPassGap` after the previous pass started. A pass is idle if
+it delivered no result to the caller and either received no advertisements or leaves the next
+pass starting at the same bucket as itself.
+After `k` consecutive idle passes, the next pass starts at least
+`min(SearchPassBackoff, SearchPassGap * 2^k)` after the previous one. A pass that is not idle
+resets the spacing to `SearchPassGap`. The discoverer SHOULD back off this way; the
+recommended values are `SearchPassGap = 2 sec` and `SearchPassBackoff = 60 sec`
+(provisional, see [Parameters](#parameters)).
+
+#### Result Delivery
+
 A registrar returns advertisements for service `s` in [TOPICNODES] responses. The discoverer
-validates the returned advertisements, extracts the advertised ENRs, and de-duplicates them by
-advertiser identity. Advertisements are candidate results for the target service. The caller may
+validates the returned advertisements, discards those whose ENR does not advertise a supported
+`ng` version, and extracts the advertised ENRs. Advertisements are candidate results for the target service. The caller may
 stop lookup when it has collected enough distinct advertisers for its local or service-specific
 purpose. This target is denoted `F_lookup` in this document and is determined by the application,
 service binding, or local implementation policy. It is a caller-side result target, and has no protocol-wide fixed default. A caller stopping
 before reaching its target retains the valid advertisers collected so far. The search iterator
 continues through successive passes until the caller closes it or the discovery system shuts down.
 
-If a queried
-registrar is unreachable, times out, or returns a malformed response, the discoverer treats that
-query as failed and continues with another candidate. Repeated failures may cause the registrar to
-be temporarily excluded from operations.
+The discoverer SHOULD NOT deliver the same advertiser repeatedly across passes. It records
+each delivered node, with its ENR sequence number, in a result filter for `E` after the
+delivery. While a node is recorded, it is not delivered again, except once with an ENR whose
+sequence number is higher than the recorded one. After that re-delivery the node is not
+delivered again until its entry expires. Within one pass, each node is delivered at most once.
+The recommended filter capacity is `SearchFilterSize = 50,000` entries (provisional, see
+[Parameters](#parameters)); when the filter is full, the entry that expires first is dropped.
+
+The discoverer SHOULD mix results across registrars, so that the first results of a pass do
+not all come from one registrar. Within a pass, results that pass the filter are queued per
+responding registrar. Queued results are released once `SearchMixRegistrars` registrars have
+replied with results in the pass, or once the first queued result has waited
+`SearchMixWait`; the condition is checked whenever a query completes. Released results go out
+in rounds, one result from each registrar with results waiting, in the order the registrars
+first replied. A round with results from a single registrar waits until those results have
+waited `SearchMixWait`. A node queued by several registrars is delivered once, with the ENR
+that has the highest sequence number. When the pass ends, every queued result is released in
+the same rounds. The recommended values are `SearchMixRegistrars = 5` and
+`SearchMixWait = 5 sec` (provisional, see [Parameters](#parameters)).
+
+The discoverer SHOULD NOT send a new query while `SearchUnreadLimit` or more results wait
+unread by the caller, and resumes querying when the caller reads. The recommended value is
+`SearchUnreadLimit = 16`, equal to `F_return` (provisional, see [Parameters](#parameters)).
 
 Lookup responses may also include auxiliary ENRs in [NODES] responses. These ENRs are not lookup
 results; they are auxiliary routing information used to improve the discoverer's search table
@@ -949,22 +1050,31 @@ to search buckets around the current active bucket. `SearchAuxRadius` controls t
 its current value is `1`. The request therefore normally includes the active bucket and its
 neighbouring search buckets, subject to valid indices and available capacity. A bucket has space
 when it holds fewer than `SearchBucketSize` candidates. This replenishes registrar candidates in
-the service-distance region that adaptive lookup currently prefers.
+the service-distance region that adaptive lookup currently prefers. The discoverer lists the
+topic-distances from farthest to closest to `s`. A registrar that caps auxiliary ENRs serves
+the earliest listed distances first (see [Auxiliary ENR Selection](#auxiliary-enr-selection)).
 
 An ENR learned through lookup is eligible for insertion into the search table only if:
 
 1. the ENR is valid;
 2. the ENR advertises a supported TopDisc version;
-3. the node is not temporarily excluded by local TopDisc usability policy;
+3. the node is not temporarily excluded by local TopDisc usability policy, and is not in the
+lookup's failed set;
 4. the advertised IP address passes the ordinary Discovery v5 address-validation checks and any
 configured network restrictions;
 5. the ENR advertises a UDP port greater than `1024`;
-6. the node is not the discoverer itself or a duplicate candidate;
+6. the node is not the discoverer itself or a duplicate candidate, has not answered or failed
+a query in the current pass, and is not in the lookup's asked set (such a node becomes a
+spare, see [Lookup Procedure](#lookup-procedure));
 7. the destination search bucket has available capacity; and
 8. inserting the node does not violate the bucket's IP-prefix diversity restriction.
 
 As part of the IP-prefix diversity restriction for IPv4, the current implementation allows at most one candidate from the same `/24` prefix
-in a search bucket; LAN addresses are exempt from this restriction.
+in a search bucket; LAN addresses are exempt from this restriction. The search table is filled
+afresh for each pass, so the restriction holds within one pass. A registrar that answered keeps
+its prefix slot for the rest of the pass, so another node from the same `/24` cannot take its
+place; a registrar whose query failed releases its slot. This differs from the advertise table,
+which keeps its prefix accounting for as long as the service is advertised.
 
 When processing auxiliary ENRs from a single response, at most one candidate is admitted into
 any given search bucket. This limits the contribution of a single responding registrar to that
@@ -978,20 +1088,29 @@ according to the TopDisc failure-handling rules.
 
 The TopDisc algorithms use the following parameters:
 
-| Parameter          | Meaning                                                                       | Default        |
-|--------------------|-------------------------------------------------------------------------------|----------------|
-| `K_register`       | Target number of active or pending registrations per bucket                   | `5`            |
-| `F_return`         | Maximum number of advertisements returned for one topic query                 | `16`           |
-| `F_lookup`         | Caller/application-defined target number of distinct advertiser results       | Caller-defined |
-| `SearchBucketSize` | Maximum candidate capacity of one search bucket                               | `8`            |
-| `SearchYieldFloor` | Yield threshold for staying at the responding bucket instead of moving closer | `8`            |
-| `SearchAuxRadius`  | Neighbourhood around the active bucket for auxiliary registrar requests       | `1`            |
-| `E`                | Advertisement expiry duration                                                 | `15 min`       |
-| `C`                | Registrar ad cache capacity                                                   | `1000`         |
-| `δ`                | Registration retry window duration                                            | `5 sec`      |
-| `Pocc`             | Occupancy exponent in the waiting-time function                               | `10`           |
-| `G`                | Safety constant in the waiting-time function                                  | `10^-7`        |
+| Parameter             | Meaning                                                                       | Default                |
+|-----------------------|-------------------------------------------------------------------------------|------------------------|
+| `K_register`          | Target number of active or pending registrations per bucket                   | `5`                    |
+| `F_return`            | Maximum number of advertisements returned for one topic query                 | `16`                   |
+| `F_lookup`            | Caller/application-defined target number of distinct advertiser results       | Caller-defined         |
+| `SearchBucketSize`    | Maximum candidate capacity of one search bucket                               | `8`                    |
+| `SearchYieldFloor`    | Yield threshold for staying at the responding bucket instead of moving closer | `8`                    |
+| `SearchAuxRadius`     | Neighbourhood around the active bucket for auxiliary registrar requests       | `1`                    |
+| `SearchPassQueries`   | Maximum number of queries in one search pass                                  | `32` (provisional)     |
+| `SearchPassGap`       | Minimum spacing between the starts of consecutive search passes               | `2 sec` (provisional)  |
+| `SearchPassBackoff`   | Maximum spacing between search passes after idle passes                       | `60 sec` (provisional) |
+| `SearchUnreadLimit`   | Unread results at which the discoverer stops sending queries                  | `16` (provisional)     |
+| `SearchFilterSize`    | Maximum number of entries in the lookup result filter                         | `50,000` (provisional) |
+| `SearchMixRegistrars` | Registrars that must reply with results before mixed results are released     | `5` (provisional)      |
+| `SearchMixWait`       | Maximum wait before mixed results are released                                | `5 sec` (provisional)  |
+| `E`                   | Advertisement expiry duration                                                 | `15 min`               |
+| `C`                   | Registrar ad cache capacity                                                   | `1000`                 |
+| `δ`                   | Registration retry window duration                                            | `5 sec`                |
+| `Pocc`                | Occupancy exponent in the waiting-time function                               | `10`                   |
+| `G`                   | Safety constant in the waiting-time function                                  | `10^-7`                |
 
+Values marked *(provisional)* follow the current implementation and are pending the
+parameter decision in datahop/go-ethereum#12.
 
 ## Implementation Considerations
 
@@ -1024,14 +1143,6 @@ The exact encoding of TopDisc messages, ticket signatures, request identifiers, 
 returned advertisements, neighbour ENRs, and any application-specific advertisement payload is
 specified in the wire-format document.
 
-[FINDNODE]: ./discv5-wire.md#findnode-request-0x03
-[REGTOPIC]: ./discv5-wire.md#regtopic-request-0x07
-[REGCONFIRMATION]: ./discv5-wire.md#regconfirmation-response-0x08
-[TOPICQUERY]: ./discv5-wire.md#topicquery-request-0x09
-[TOPICNODES]: ./discv5-wire.md#topicnodes-response-0x0a
-[NODES]: ./discv5-wire.md#nodes-response-0x04
-[ng ENR entry]: ../enr-entries/ng.md
-
 ### References
 
 - [DISC-NG paper]
@@ -1039,3 +1150,10 @@ specified in the wire-format document.
 
 [DISC-NG paper]: https://doi.org/10.1109/EuroSP60621.2024.00019
 [RFC 5869]: https://www.rfc-editor.org/rfc/rfc5869
+[FINDNODE]: ./discv5-wire.md#findnode-request-0x03
+[REGTOPIC]: ./discv5-wire.md#regtopic-request-0x07
+[REGCONFIRMATION]: ./discv5-wire.md#regconfirmation-response-0x08
+[TOPICQUERY]: ./discv5-wire.md#topicquery-request-0x09
+[TOPICNODES]: ./discv5-wire.md#topicnodes-response-0x0a
+[NODES]: ./discv5-wire.md#nodes-response-0x04
+[ng ENR entry]: ../enr-entries/ng.md

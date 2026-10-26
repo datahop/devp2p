@@ -308,10 +308,13 @@ auxiliary ENRs selected from its service-table view (see NODES).
 
 The `topic-distance` list serves the same purpose as in REGTOPIC: it tells the recipient
 which log2 distances from `topic` the sender's service table still has room for, so the
-recipient can choose useful auxiliary ENRs to include in its NODES responses.
+recipient can choose useful auxiliary ENRs to include in its NODES responses. The list is in
+priority order: a recipient that caps the number of auxiliary ENRs serves the earliest listed
+distances first. A discoverer lists the distances from farthest to closest to `topic`.
 
-See the [theory section on lookup responses] for the discoverer-side termination semantics
-(distinct-advertisers count) and the [theory section on parameters] for `Freturn`.
+See the [theory section on lookup responses] for the registrar side, the [theory section on
+the lookup procedure] for how the discoverer uses the responses, and the [theory section on
+parameters] for `F_return`.
 
 ### TOPICNODES Response (0x0A)
 
@@ -330,9 +333,9 @@ Implementations may place a limit on the allowed maximum for `total`; if exceede
 additional responses may be ignored.
 
 The recipient should return only non-expired advertisements from its ad cache. When the
-ad cache contains more than `Freturn` advertisements for the topic, the recipient
-selects which advertisements to return; the exact selection policy is implementation
-defined.
+ad cache contains more than `F_return` advertisements for the topic, the recipient
+SHOULD return a pseudo-random subset of at most `F_return` of them, as specified in the
+[theory section on lookup responses].
 
 TOPICNODES carries only registered advertisers. Auxiliary routing information for the
 sender's service table is carried separately via NODES responses.
@@ -347,6 +350,7 @@ A collection of test vectors for this specification can be found at
 [theory section on registrar admission control]: ./discv5-theory.md#admission-control
 [theory section on the waiting-time function]: ./discv5-theory.md#waiting-time-function
 [theory section on lookup responses]: ./discv5-theory.md#lookup-responses
+[theory section on the lookup procedure]: ./discv5-theory.md#lookup-procedure
 [theory section on parameters]: ./discv5-theory.md#parameters
 [EIP-778]: ../enr.md
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md
