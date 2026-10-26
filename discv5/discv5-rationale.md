@@ -642,10 +642,9 @@ registrar's results. A caller that stops after its first few results would then 
 single registrar, which a malicious registrar could fill with sybil advertisements. Mixing
 holds results until several registrars have answered, or until a short wait has passed, and
 then delivers them one registrar at a time. In simulation (datahop/go-ethereum#140), mixing
-cut the share of searches whose first results were all sybils from 21 % to 0.15 %.
-
-A large `F_return` raises the eclipse risk. In simulation with 10 % sybil
-nodes, an `F_return` of 16 eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of 6.
+cut the share of searches whose first results were all sybils from 21 % to 0.15 %. Mixing
+does not remove the eclipse risk of a large `F_return`; see
+[Eclipse Risk and `F_return`](#eclipse-risk-and-f_return).
 
 ## Why Topic-Centered Service Tables?
 
@@ -687,6 +686,15 @@ re-registering at every moment.
 The cache bounds registrar storage and makes advertisements soft state. Advertisers must
 renew or replace advertisements over time, which allows the system to adapt to churn,
 failures, and changes in service participation.
+
+The cache is a hard limit. A full cache returns a ticket for the time of its next expiry
+rather than evicting an admitted advertisement, so that a new advertiser cannot push out an
+honest one by asking.
+
+A registrar also drops the advertisements of an advertiser that its ordinary node table has
+dropped for failing liveness checks. The registrar has then seen the advertiser fail, and
+returning its advertisements would send discoverers to a node that is likely gone for the
+rest of the advertisement lifetime.
 
 The [ad cache] and [service table] serve different purposes: the former stores
 advertisements at a registrar, while the latter provides the service-centred view used
@@ -734,7 +742,73 @@ an advertiser never returns, the registrar does not need to clean up per-request
 that advertiser.
 
 Tickets are bound to the advertisement being registered. This prevents a ticket issued for
-one topic or advertised ENR from being reused to register a different advertisement.
+one topic or advertised ENR from being reused to register a different advertisement. The
+current implementation binds only the topic; see [Ticket Transfer](#ticket-transfer).
+
+## Why Answer Every Registration Request?
+
+An advertiser cannot tell a silent registrar from a dead one. If a registrar drops a request
+it does not like, the advertiser sees a timeout: it holds the registrar in its failed set for
+an advertisement lifetime and counts a liveness failure against it in its node table. The
+registrar is penalised as if it had failed, and the advertiser loses a working registrar.
+
+In a 25,000-node AWS run with churn and unreachable ("ghost") nodes, registrars answered
+nothing to a ticket outside its window. TopDisc searchers found a median of 35.7 % of their
+topic's providers, against 72.3 % with plain discv5. The REGTOPIC traces of that run
+(datahop/go-ethereum#152) show that 96 % of the ticket retries arrived after the 5 s window and
+were dropped without an answer; these made up 76 % of all REGTOPIC timeouts. The [tickets]
+rules therefore answer every request: a rejection with an explicit empty response, an early
+ticket with the remaining wait, a late, expired or invalid ticket as a new attempt.
+
+The retries that did arrive inside the window were late, relative to its start, by 50 ms at the
+median and 3.8 s at the 99th percentile. The late grace `ε` credits a retry that misses the
+window by a few seconds with the wait it was scheduled to have, instead of restarting its
+wait. `ε` is short against `E`, so a ticket cannot be redeemed long after it was earned, and
+the ticket issued in reply is re-based so that the lateness is not credited later either.
+
+A ticket is credited once. Without that rule, an advertiser whose advertisement was removed,
+for example after the registrar's node table dropped it, could present the ticket that
+admitted it again and obtain a new advertisement with a full lifetime without waiting. An early
+ticket is returned unchanged rather than re-issued: a re-issued ticket would be a second valid
+ticket for the same window, which the memory of credited tickets would not recognise. It also
+keeps an early retry from learning the current waiting time.
+
+A registrar admits any advertisement whose remaining wait is below `W_min`, so it has no
+reason to quote less. An honest registrar can still send a shorter wait: a full cache quotes the
+time until its next expiry, and an early ticket comes back with whatever remains of its wait.
+Dropping a registrar for such a quote would penalise correct behaviour, so the advertiser
+waits `W_min` instead. A hostile registrar that answers every retry with a zero wait gains
+little from this. The advertiser sends it at most one request per `W_min`, per-bucket
+scheduling keeps it from delaying the other buckets, and the clamped waits add up to
+`RegAttemptBudget`, after which the attempt is abandoned.
+
+## Why Schedule Registrations Per Bucket?
+
+A ticket retry is useful only inside its window. Before the change described above, each
+advertised topic sent all its REGTOPIC requests through one sender. A due ticket retry then
+waited behind every first contact ahead of it, each of which could take a 700 ms timeout when
+the registrar was dead, and arrived after its window. Several concurrent senders keep one
+unresponsive registrar from holding back the rest.
+
+Serving buckets in turn keeps a bucket with many new candidates from delaying the retries of
+another bucket. Within a bucket, a due ticket retry goes before a first contact, because its
+window is about to pass and a first contact can wait. The priority is per bucket, not global:
+registrars that answer every request with a ticket cannot take all the senders.
+
+The attempt budget `RegAttemptBudget` bounds how long an advertiser keeps waiting on one
+registrar. After `E`, every advertisement in the registrar's cache has expired and been
+replaced, so a registrar that still has not admitted the advertisement is overloaded or
+malfunctioning, and the advertiser does better with another one. The budget is not a failure:
+the registrar answered, and it may be tried again later.
+
+The failed set keeps a registrar that timed out, rejected the request or sent a malformed
+response out of the advertise table for an advertisement lifetime, from every source, so that auxiliary
+ENRs and the node table do not offer it again at once.
+
+Renewal takes the next standby candidate rather than the same registrar. This spreads an
+advertiser's advertisements over more registrars across successive lifetimes, and a registrar
+does not extend an advertisement it already holds, so registering again with it before expiry
+would not help.
 
 ## Why Recompute Waiting Times?
 
@@ -772,16 +846,34 @@ prefix limits can harm honest users behind NATs, shared hosting providers, or ot
 infrastructure. A similarity score instead increases cost gradually as concentration
 increases.
 
-## Why Use a Safety Constant?
+## Why Change the Waiting-Time Function?
 
-If an advertisement is for an underrepresented topic and comes from an underrepresented IP
-prefix, the service-similarity and IP-similarity components may both be small.
+The [waiting-time function] of the current implementation differs from the form in
+[DISC-NG], which multiplies `E / (1 - c/C)^Pocc` by `c(s)/c + score + G` for a small safety
+constant `G = 10^-7`.
 
-The safety constant in the [waiting-time function] ensures that the waiting time does not
-become zero in such cases. This
-provides a baseline admission cost and helps prevent the ad cache from being filled too
-quickly by advertisements that appear diverse only because they use random topic
-identifiers or diverse IP prefixes.
+The safety constant is dropped. As a term multiplied by the occupancy factor, it added a
+waiting time well below one second while the cache was lightly loaded, which the `W_min`
+admission slack absorbs, so it had no effect there. Near full occupancy, the occupancy factor
+grows without bound, and `G` alone then quoted a long wait to an advertisement for a new
+service from a diverse address, even when the cache had space. The cost of dropping it is that
+an advertisement for a service with no cached advertisements, from an address with a score of
+`0`, is admitted without waiting; see
+[Admission Without a Safety Constant](#admission-without-a-safety-constant).
+
+The service term divides by `c + 1` instead of `c`, which defines it for an empty cache
+without a special case. The factor `Wbase = 0.1` scales the occupancy term, so that an empty
+cache charges at most `E / 10` for a fully similar advertisement. Both values are provisional,
+pending the parameter decision in datahop/go-ethereum#12.
+
+The occupancy factor makes the waiting time grow very fast as the cache fills: about
+`3 * 10^10` seconds at 86 % occupancy. Converted to a 64-bit nanosecond duration, such a value
+is out of range. In Go the result of that conversion depends on the platform, and on amd64 it
+became negative, so that a cache about 86 % full or more admitted every request
+(datahop/go-ethereum#154). The waiting time is therefore capped at `maxWaitTime` before the
+conversion. The cap is far above `RegAttemptBudget`, so a capped quote still makes the
+advertiser move to another registrar, on every platform. For the same reason, advertisers
+saturate a `wait-time` that does not fit their duration type.
 
 ## Why Use a Waiting-Time Lower Bound?
 
@@ -831,6 +923,55 @@ still participate in ordinary node discovery.
 TopDisc-capable nodes advertise support in their ENR. This allows implementations to build
 service tables from ordinary node discovery state while selecting only nodes that can
 handle TopDisc messages.
+
+## TopDisc Security Considerations
+
+The following issues are open in the current specification and implementation.
+
+### Ticket Transfer
+
+The [ticket mechanism] requires a ticket to be bound to its advertisement, but the current
+implementation binds it to the topic only (datahop/go-ethereum#68). A node that has waited for
+a ticket can hand it to another node, which presents it for its own ENR and is credited the
+first node's waiting time. The waiting time was computed for the first node's address, so an
+operator can let a well-scored address collect tickets and use them for nodes whose addresses
+would have been charged more. Single use limits each ticket to one admission.
+
+### Admission Without a Safety Constant
+
+Without `G`, an advertisement for a service with no cached advertisements from an address with
+a score of `0` waits for nothing, at any occupancy. Advertisements for many distinct services,
+from diverse addresses, can fill a registrar's cache up to `C` at the rate the attacker can send
+them. Honest advertisers then receive tickets for the time of the next expiry.
+
+### IPv6 Prefixes
+
+Neither address rule aggregates IPv6 addresses at an operator's allocation, such as a `/48` or
+a `/64`. The advertise and search tables apply the IPv4 `/24` prefix length to IPv6 addresses,
+which groups addresses far more coarsely than any single allocation. The IP similarity tree
+considers only prefix lengths `k` with `2^k <= N`, which is at most `12` bits with `C = 5,000`.
+Two IPv6 addresses are therefore compared only on their first `12` bits.
+
+### LAN Addresses
+
+LAN addresses are exempt from the `/24` limits and are not scored by the IP similarity tree. A
+registrar admits an advertisement only if its ENR address equals the packet source, so a LAN
+address is accepted only from a node on the registrar's own network. In a deployment on one
+network, such as a test network, these rules then give no address diversity at all.
+
+### Unverified Auxiliary ENRs
+
+A registrar returns auxiliary ENRs from its ordinary node table without checking that the
+nodes are alive, unlike [FINDNODE] responses. The requester inserts them into its service
+table before contacting them. A dead or malicious registrar candidate costs the requester a
+timeout and then enters its failed set. The one-candidate-per-registrar-per-bucket rules bound
+how many entries a single registrar can place in one bucket.
+
+### Eclipse Risk and `F_return`
+
+A large `F_return` raises the eclipse risk. In a 30,000-node simulation with 10 % sybil
+nodes, an `F_return` of 16 eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of
+6. The value of `F_return` is part of the parameter decision in datahop/go-ethereum#12.
 
 # References
 
@@ -906,3 +1047,7 @@ handle TopDisc messages.
 [IP similarity tree]: ./discv5-theory.md#ip-similarity-tree
 
 [waiting-time lower bound]: ./discv5-theory.md#waiting-time-lower-bound
+
+[FINDNODE]: ./discv5-wire.md#findnode-request-0x03
+
+[DISC-NG]: https://doi.org/10.1109/EuroSP60621.2024.00019
