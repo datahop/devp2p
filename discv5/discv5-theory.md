@@ -391,6 +391,14 @@ A node may maintain a service table for each service identifier for which it per
 operations. Advertisers use `B(s)` as an advertise table for service `s`; discoverers use `B(s)` as
 a search table for service `s`.
 
+Whether a node that both advertises and searches for `s` keeps one table or two is an
+implementation choice. The current implementation keeps two: an advertise table kept for as long as
+`s` is advertised, and a search table filled afresh for each search pass. The topic-distance hints
+of a request come from the table of the operation that sends it: [REGTOPIC] lists the advertise
+buckets with space (see [Advertisement Placement](#advertisement-placement)), [TOPICQUERY] the
+search buckets around the active bucket (see
+[Updating the Search Table During Lookup](#updating-the-search-table-during-lookup)).
+
 ### Bootstrapping from Ordinary Node Discovery
 
 A node does not start advertisement placement or lookup from an empty service table.
@@ -463,6 +471,15 @@ of a responder to fill a response with many ENRs from one bucket.
 
 If the registrar has no eligible ENR for a requested distance, it omits that auxiliary ENR.
 
+The requester lists the topic-distances in priority order, and a registrar that caps auxiliary
+ENRs serves the earliest listed distances first. The current implementation serves at most the
+first 8 listed distances, so it returns at most 8 auxiliary ENRs. It draws them from its ordinary
+node table, keeping TopDisc-capable nodes whose address may be relayed to the requester, as for
+[NODES] responses to [FINDNODE], and picks one at random per distance. Unlike [FINDNODE] responses,
+these ENRs are not restricted to nodes whose liveness the registrar has verified. An advertiser
+lists the distances of its advertise buckets from farthest to closest, and gives the closest
+bucket, which holds all distances `239` and below, as distance `239`.
+
 The same auxiliary-ENR selection rule applies to registration responses and lookup responses.
 
 ### TopDisc Liveness and Temporary Exclusion
@@ -493,8 +510,15 @@ and table-maintenance rules.
 
 A registrar stores admitted advertisements in a bounded ad cache.
 
-Each admitted advertisement expires after duration `E`. The ad cache has capacity `C`. A registrar
-stores at most one active advertisement for the same advertiser and service.
+Each admitted advertisement expires after duration `E`. The ad cache has capacity `C`, a hard
+limit: a registrar MUST NOT hold more than `C` advertisements. A registrar stores at most one
+active advertisement for the same advertiser and service.
+
+When an advertisement has waited long enough to be admitted but the cache is full, the registrar
+returns a ticket whose waiting time is the time until the next advertisement in the cache
+expires. The advertiser retries at that time with the ticket, and keeps the waiting time it has
+accumulated. The time until the next expiry can be below `W_min`; the advertiser then waits
+`W_min` (see [Registration Procedure](#registration-procedure)).
 
 The ad cache is not a service table. It is registrar-local storage used to answer service lookup
 requests.
@@ -512,10 +536,18 @@ advertiser, and IP prefix.
 Expired advertisements are removed automatically. Once an advertisement expires, it is no longer
 returned in lookup responses.
 
-If a registrar receives a registration request for an advertisement that is already present in its
-ad cache, the registrar may treat the request as a renewal or ignore it, depending on the renewal
-semantics specified by the wire-format document. The registrar must not store duplicate active
-advertisements for the same advertiser and service.
+A registrar SHOULD also remove an advertiser's advertisements, for all services, when its ordinary
+node table drops the advertiser after failed liveness checks. Discoverers would otherwise be sent
+to a node that the registrar itself no longer considers alive. Advertisements of an advertiser that
+is not in the node table are kept until they expire.
+
+The registrar MUST NOT store duplicate active advertisements for the same advertiser and service.
+The current implementation answers a registration request for an advertisement already in the
+cache as admitted, with `wait-time` equal to `E`, and leaves the stored advertisement and its
+expiry time unchanged. Re-registering before expiry therefore does not extend an advertisement.
+Open issue: the reported lifetime can exceed the remaining one, so the advertiser may count the
+advertisement as active after it has expired. Reporting the remaining lifetime would remove this
+mismatch.
 
 ### Advertisements
 
@@ -551,10 +583,21 @@ Admission is based on a **waiting-time mechanism**. If an advertisement is not a
 the registrar returns a ticket and a waiting time. This mechanism promotes diversity in the ad cache
 and avoids requiring registrars to keep unbounded per-request state for pending registrations.
 
+Before computing a waiting time, the registrar checks the advertised ENR. It MUST reject the request
+if the ENR is invalid, if its node ID is not the sender's, if its address of the packet's address
+family does not equal the packet's source address, or if its address of the other family is not
+publicly routable (see [REGTOPIC]). A rejection is answered with a [REGCONFIRMATION] carrying no
+ticket and a waiting time of `0`, and no auxiliary ENRs.
+
 When a registrar receives a registration request, it computes a waiting time from the current state
-of the ad cache and the incoming advertisement. If the effective remaining waiting time is less than
-or equal to zero, the advertisement is admitted. Otherwise, the registrar returns a ticket and a
-waiting time.
+of the ad cache and the incoming advertisement. If the effective remaining waiting time is at most
+`W_min`, the minimum quoted waiting time, the advertisement is admitted. Otherwise, the registrar
+returns a ticket and the remaining waiting time; `W_min = 1 sec`. The slack admits an advertiser
+whose remaining wait is too short to be worth another round trip, so a registrar SHOULD NOT quote
+a waiting time below `W_min`. Two replies can still carry a shorter one: the next-expiry reply of a
+full cache (see [Ad Cache](#ad-cache)) and an early ticket returned unchanged (see
+[Tickets](#tickets)). Advertisers MUST tolerate such quotes as described in
+[Registration Procedure](#registration-procedure).
 
 The registrar does not need to keep per-request state for pending registrations. Instead, the state
 needed to prove accumulated waiting time is carried by the advertiser in the registrar-issued
@@ -564,9 +607,10 @@ The waiting time in a ticket is not binding. On each retry, the registrar recomp
 time using the current ad cache state. The advertiser is admitted only when its accumulated waiting
 time is sufficient according to the recomputed waiting time.
 
-If an advertiser retries too early, retries too late, omits the latest ticket, or presents an
-invalid ticket, the registrar treats the request as a new registration attempt or rejects it,
-depending on the wire-format rules.
+Every registration request is answered. If an advertiser retries too early, the registrar returns
+its ticket unchanged with the remaining wait. If it retries too late, omits the latest ticket,
+presents a ticket that was already credited, or presents an invalid ticket, the registrar treats
+the request as a new registration attempt. The rules are given in [Tickets](#tickets).
 
 ### Tickets
 
@@ -580,7 +624,9 @@ The ticket contains a digest of this advertisement, denoted `adDigest`.
 The advertiser uses the latest ticket issued by the registrar when retrying the registration. A
 ticket issued for one advertisement or registrar MUST NOT be accepted for a different registration
 request. In particular, a ticket issued for one service, advertised ENR, or advertisement payload
-MUST NOT be reused for another.
+MUST NOT be reused for another. The current implementation binds a ticket to the service identifier
+only, not to the advertiser (datahop/go-ethereum#68); see
+[Security Considerations](./discv5-rationale.md#topdisc-security-considerations).
 
 The ticket is opaque to the advertiser. The advertiser does not interpret the ticket contents; it
 stores the latest ticket returned by the registrar and presents it in the next registration attempt
@@ -596,8 +642,9 @@ Algorithmically, a ticket contains enough authenticated information for the regi
 - `auth`: registrar authentication over the ticket contents.
 
 The registrar authenticates the ticket, for example by signing the ticket body or applying a
-registrar-local MAC. A registrar MUST reject a ticket that fails authentication or that was not
-issued by that registrar.
+registrar-local MAC. A registrar MUST reject a ticket that fails authentication, that was not
+issued by that registrar, or that was issued for a different advertisement: it credits no waiting
+time for it and treats the request as a new registration attempt, which it still answers.
 
 The timestamps `tinit` and `tmod` are generated and interpreted only by the registrar. They are
 local to the registrar and are not compared against the advertiser's clock. The only timing value
@@ -606,27 +653,49 @@ registration response.
 
 A retry is valid only during the registration window associated with the ticket:
 
-    tmod + twait ≤ now ≤ tmod + twait + δ
+    tmod + twait ≤ now < tmod + twait + δ
 
 where `now` is the registrar's current local time when processing the retry, and `δ` is the
-registration window duration.
+registration window duration, `δ = 5 sec`.
 
 The advertiser does not use `tmod` to schedule the retry and does not need its clock to be
 synchronised with the registrar's clock. The advertiser waits for the relative duration `twait`
 using its own local timer, then retries with the latest ticket. The registrar validates the retry
 window using its own clock when the ticket is presented again.
 
-When a returning advertiser presents a valid ticket, the registrar computes the accumulated waiting
-duration as:
+When a returning advertiser presents a valid ticket within its window, the registrar computes the
+accumulated waiting duration as:
 
     waited = now - tinit
 
 where `now` and `tinit` are both interpreted according to the registrar's local clock.
 
-If the retry is too early, too late, does not include the latest ticket, includes a ticket whose
-`adDigest` does not match the advertisement in the current registration request, or includes an
-invalid ticket, the registrar SHOULD reject the request or treat it as a new registration attempt
-according to the registration rules.
+The registrar answers every retry with a [REGCONFIRMATION]. Let `start = tmod + twait` be the
+start of the ticket's window and `ε` the late grace, a registrar-local duration that MUST be small
+against `E`; the recommended value is `ε = 10 sec`. The registrar treats an authenticated ticket
+according to when it is presented:
+
+- **Early** (`now < start`): the registrar returns the same ticket bytes it received, with
+  `start - now` as the waiting time, and no auxiliary ENRs. It does not evaluate the
+  waiting-time function and does not move the window. An early retry can neither shorten the wait
+  nor learn the current waiting time.
+- **On time** (`start ≤ now < start + δ`): the ticket is credited with `waited = now - tinit`.
+- **Late** (`start + δ ≤ now < start + δ + ε`): the ticket is credited with the waiting time it
+  was scheduled to have, `waited = start - tinit`. If the registrar issues a new ticket in reply,
+  it sets that ticket's `tinit` to `now - waited`, so that the time past the window is not
+  credited on the next retry either.
+- **Expired** (`now ≥ start + δ + ε`): the ticket proves nothing. The request is a new
+  registration attempt (`waited = 0`, `tinit = now`).
+
+A ticket is credited once. A registrar that has credited a ticket, on time or late, MUST treat any
+later presentation of the same ticket as a new registration attempt, and still answer it. To do
+so, it MUST remember each credited ticket for at least `δ + ε` after the ticket's window start,
+the span in which the ticket could be credited. Whoever presents a ticket first consumes it. The
+current implementation remembers credited tickets by their MAC for `δ + ε` from the time of
+crediting, up to 16,384 entries, dropping the oldest entry when full.
+
+A retry that does not include the latest ticket, or whose ticket fails authentication or belongs to
+another advertisement, is a new registration attempt.
 
 Because the ticket is bound to `adDigest`, changing the service identifier, advertised ENR, or
 service-specific advertisement payload during a registration attempt requires starting a new
@@ -637,24 +706,39 @@ registration attempt or obtaining a new ticket for the updated advertisement.
 The waiting-time function determines how long an advertisement must wait before admission.
 
 The function depends on the current ad cache occupancy, the number of cached advertisements for the
-same service, the IP similarity of the advertiser, and a safety constant. The waiting time shapes
-the contents of the ad cache and provides flow control at the registrar.
+same service, and the IP similarity of the advertiser. The waiting time shapes the contents of the
+ad cache and provides flow control at the registrar. The function is registrar-local: an advertiser
+only follows the waiting times it is given. The recommended function, as currently implemented
+(provisional, see [Parameters](#parameters)), is:
 
-The waiting time is:
-
-    w(ad) = E * 1 / (1 - c/C)^Pocc * ( c(ad.service)/c + score(ad.IP) + G )
+    base(c) = Wbase * E / (1 - c/C)^Pocc
+    w(ad)   = base(c) * c(ad.service) / (c + 1)  +  base(c) * score(ad.IP)
 
 where:
 
 - `E` is the advertisement expiry duration;
 - `C` is the ad cache capacity;
-- `c` is the current number of advertisements in the cache; when `c = 0`, the service-similarity
-  term is defined as `0`.
+- `c` is the current number of advertisements in the cache;
 - `c(ad.service)` is the number of cached advertisements for the service being advertised;
 - `score(ad.IP)` is the IP similarity score computed from the advertiser's IP (ad.IP) in the
   advertised ENR;
 - `Pocc` is the occupancy exponent;
-- `G` is the safety constant.
+- `Wbase` is the base waiting-time factor, `0.1`, so that `base(0) = E / 10`.
+
+The first term is the service component and the second the IP component. Each component is raised
+to its lower bound before the two are added (see [Waiting-Time Lower Bound](#waiting-time-lower-bound)).
+
+`base(c)` grows without bound as `c` approaches `C`. The registrar caps the resulting waiting time,
+and every recorded lower bound, at `maxWaitTime` before converting it to its local duration type.
+The recommended value is `maxWaitTime = 24 h` (provisional), far above any attempt budget, so a
+capped quote still makes the advertiser abandon the attempt (see
+[Registration Procedure](#registration-procedure)).
+
+This differs from the form given in [DISC-NG paper], `E / (1 - c/C)^Pocc * (c(ad.service)/c +
+score(ad.IP) + G)`, in three ways: the occupancy factor is scaled by `Wbase`, the service term
+divides by `c + 1`, which also defines it for an empty cache, and there is no safety constant
+`G`. The reasons are given in the
+[rationale](./discv5-rationale.md#why-change-the-waiting-time-function).
 
 The occupancy component increases the waiting time as the ad cache approaches capacity. This limits
 the rate at which new advertisements can be admitted.
@@ -667,15 +751,17 @@ The IP-similarity component increases the waiting time for advertisers whose IP 
 overrepresented in the cache. This discourages a small number of IP prefixes from dominating the
 registrar's ad cache.
 
-The safety constant prevents the waiting time from becoming zero when the cache is sparsely
-populated and the incoming advertisement appears dissimilar to existing entries.
+An advertisement for a service with no cached advertisements, from an address with a score of `0`
+and no applicable lower bound, has a waiting time of `0` and is admitted at once if the cache has
+space.
 
 When a returning advertiser presents a valid ticket, the registrar computes the effective remaining
 waiting time as:
 
-    tremaining = w(current-cache, ad) - (now - tinit)
+    tremaining = w(current-cache, ad) - waited
 
-where `tinit` is the ticket creation time. The advertisement is admitted when `tremaining ≤ 0`.
+where `waited` is the waiting time credited to the ticket (see [Tickets](#tickets)). The
+advertisement is admitted when `tremaining ≤ W_min` and the cache has space.
 
 ### IP Similarity Tree
 
@@ -721,8 +807,10 @@ trees. If an advertisement contains eligible addresses from both families,
 `score(ad.IP)` is the larger of the two scores. If only one eligible address family is
 present, that family's score is used.
 
-Loopback, private, and link-local addresses are not scored. The IP similarity trees are
-updated as advertisements are admitted and removed.
+Loopback, private, and link-local addresses are not scored: they contribute `0`. The
+IP similarity trees are updated as advertisements are admitted and removed. In the
+current implementation, the addresses of admitted advertisements are inserted whether
+or not they are scored, so such addresses still count towards `N`.
 
 ### Waiting-Time Lower Bound
 
@@ -731,7 +819,8 @@ effective waiting time by repeatedly requesting new tickets.
 
 Without a lower bound, a pending advertiser could repeatedly request new tickets in the hope that
 cache changes cause a lower waiting time. The lower-bound rule ensures that a new waiting time
-cannot improve on the old one by more than the elapsed time.
+cannot improve on the old one by more than the elapsed time: for quotes `w1` at time `t1` and `w2`
+at a later time `t2`, `w1 - w2 ≤ t2 - t1`.
 
 Registrars do not maintain unbounded per-request lower-bound state for pending registrations.
 Lower-bound state is maintained only for bounded structures, such as:
@@ -739,14 +828,23 @@ Lower-bound state is maintained only for bounded structures, such as:
 - services already represented in the ad cache; and
 - prefixes represented in the IP similarity tree.
 
-When a service `s` enters the ad cache for the first time, the registrar initialises lower-bound
-state for `s`. When a later ticket request for `s` arrives, the registrar computes the service
-waiting-time component and applies the stored lower bound before issuing a new ticket.
+A lower bound records a value `v` and the time `t` at which it was recorded. At time `now` its
+remaining value is `max(0, v - (now - t))`: it decays one second per second. When the registrar
+issues a ticket, it raises each bound to the component it just computed, if that component exceeds
+the bound's remaining value. Admissions do not change the bounds.
+
+For a service `s` already in the ad cache, the registrar keeps one bound for the service
+component. When a later request for `s` arrives, the charged service component is the larger of
+the computed component and the bound's remaining value. The bound is dropped when the last
+advertisement for `s` leaves the cache.
 
 For IP addresses, lower-bound state is maintained at the IP-tree vertex corresponding to the longest
 prefix match already present in the tree, without introducing new vertices only for pending
-requests. If multiple IP addresses map to the same vertex, the registrar aggregates their
-lower-bound state using a maximum.
+requests. The charged IP component is the larger of the computed component and the largest
+remaining bound on any vertex along the address's path; reading the whole path keeps a bound
+effective after later insertions create deeper vertices. If the advertisement has both an IPv4 and
+an IPv6 address, the larger of the two path bounds applies. A bound disappears with its vertex when
+the last address under that prefix leaves the tree.
 
 ## Advertiser Behaviour
 
@@ -754,32 +852,49 @@ lower-bound state using a maximum.
 
 For advertisement placement, the advertiser uses a compact table with 18 buckets. Logarithmic
 distances `256` through `240` each have a separate bucket, while distances `239` and below share
-the closest bucket.
+the closest bucket. The buckets are indexed from `0`, the farthest, to `17`, the closest.
 
 For each service `s` that a node advertises, the advertiser attempts to maintain up to `K_register`
-active or pending registrations in each bucket of its advertise table `B(s)`.
+active or pending registrations in each bucket of its advertise table `B(s)`. The current value is
+`K_register = 10` (provisional, see [Parameters](#parameters)).
 
-Candidate registrars are selected from the corresponding bucket of the advertise table. Placement
-starts from the furthest bucket from `s` and progresses towards the closest bucket.
+Each bucket holds its registrars in three states: **standby** candidates not yet contacted,
+**waiting** registrars with an attempt in progress, and **registered** registrars holding an
+admitted advertisement. Whenever fewer than `K_register` registrars of a bucket are waiting or
+registered, a standby candidate becomes waiting and is contacted. A bucket keeps at most
+`RegStandbyLimit` standby candidates; the recommended value is `RegStandbyLimit = 20`. A bucket with
+fewer standby candidates than that has space, and its distance is listed in the topic-distance hints
+of the advertiser's requests.
 
-The advertiser maintains per-bucket state for ongoing and active registrations. This state records
-the registrars for which an advertisement attempt is already pending or active, so that the
-advertiser does not repeatedly choose the same registrar when filling the same bucket.
+Candidate registrars come from the ordinary node table, filtered to TopDisc-capable nodes, and from
+auxiliary ENRs. A candidate is not added to a bucket if:
 
-Within a placement cycle, registrar selection should not repeatedly return the same registrar from
-the same bucket.
+1. it is the advertiser itself, or already in the bucket;
+2. it is in the advertiser's failed set for `s` (see [Registration Procedure](#registration-procedure));
+3. the bucket already holds `RegStandbyLimit` standby candidates;
+4. another registrar in the bucket has an address in the same `/24` prefix. The current
+   implementation applies this limit to the node's endpoint address, the more global of its IPv4
+   and IPv6 addresses (IPv4 if both are equally global), with the same prefix length for both
+   families. LAN addresses are exempt. The accounting lasts for as long as the service is
+   advertised; or
+5. the candidate is an auxiliary ENR, and the registrar that returned it has already contributed a
+   candidate to that bucket, in this or an earlier response.
 
-For each bucket of the compact advertise table, while the number of active or pending
-registrations in that bucket is below `K_register`, the advertiser selects a candidate
-registrar from that bucket and starts a registration attempt.
+Advertisement placement is continuous soft state. Advertisers keep placing advertisements so that
+they remain available despite expiry, churn, registrar failure, and changes in the service table.
 
-If no eligible registrar remains in the bucket, the advertiser stops trying to fill that bucket
-during the current placement cycle. The bucket may be attempted again later after the service table
-is refreshed or after temporary exclusions expire.
+The following rules are implementation guidance. They do not change what is sent in a single
+registration request, but they decide whether ticket retries arrive within their window:
 
-Advertisement placement is continuous soft state. Advertisers periodically repeat placement and
-renewal so that advertisements remain available despite expiry, churn, registrar failure, and
-changes in the service table.
+- The advertiser SHOULD send registration requests through several concurrent senders, so that a
+  request to an unresponsive registrar does not hold back the others. The current implementation
+  uses four senders per service.
+- One bucket does not block another. When several buckets have a due attempt, the advertiser
+  serves them in turn, one attempt per bucket, starting with the farthest bucket.
+- Within a bucket, a due ticket retry goes before a first contact; otherwise the attempt due first
+  goes first.
+- The advertiser re-reads its ordinary node table at most once per `RegLoopMinPeriod` when it has
+  no usable candidates; the recommended value is `RegLoopMinPeriod = 2 sec`.
 
 ### Registration Procedure
 
@@ -787,49 +902,58 @@ An advertiser registers an advertisement by sending a registration request to a 
 The corresponding wire-format request is specified in [REGTOPIC].
 
 The first registration request for an advertisement is sent without a ticket. The registrar either
-admits the advertisement immediately or returns a ticket and a waiting time in a [REGCONFIRMATION] response.
+admits the advertisement immediately or returns a ticket and a waiting time in a [REGCONFIRMATION]
+response, or rejects the request.
 
-If the registrar returns a ticket, the advertiser waits before retrying with the latest ticket. A
-single waiting interval SHOULD NOT exceed `E`, the advertisement expiry duration. If the registrar
-still cannot admit the advertisement after the retry, it may return an updated ticket and a new
-waiting time.
+If the registrar returns a ticket, the advertiser waits for the given time and then retries with the
+latest ticket, within the ticket's window. If the registrar still cannot admit the advertisement
+after the retry, it returns an updated ticket and a new waiting time. The registrar may quote a
+waiting time longer than `E`.
 
-The protocol does not define a fixed maximum total duration for a registration attempt. An
-implementation MAY abandon an attempt after a local timeout, after a configured maximum number of
-retries, or if the registrar is considered unusable according to local liveness policy.
+The protocol does not define a maximum total duration for a registration attempt. The advertiser
+SHOULD abandon an attempt when a single quoted waiting time, or the sum of the waiting times quoted
+in the attempt, exceeds the attempt budget `RegAttemptBudget`. The current value is
+`RegAttemptBudget = 1.5 * E` (provisional, see [Parameters](#parameters)). After `E` all
+advertisements in the registrar's cache have been replaced, so a registrar that has not admitted
+the advertisement by then is overloaded or malfunctioning. An abandoned attempt does not place the
+registrar in the failed set.
 
-A registration attempt fails if the registrar is unreachable, rejects the request, returns malformed
-responses, the registration window is missed, a local retry or timeout limit is reached, or the
-registrar is otherwise considered unusable according to local liveness policy. On failure,
-the advertiser removes the registrar from the pending state for that bucket and may select another
-registrar.
+The advertiser MUST treat a quoted waiting time below `W_min` as `W_min`: it waits at least `W_min`
+before retrying and keeps the registrar. The clamped value counts toward `RegAttemptBudget`. A
+quoted value too large for the advertiser's duration type is saturated, and so exceeds the budget.
+The lifetime in an admission is capped at `E`.
+
+A registration attempt fails if the request times out, the registrar rejects the request, or it
+returns a malformed response. On failure, the advertiser removes
+the registrar from the bucket, fills the slot from the standby candidates, and adds the registrar to
+its **failed set** for `s`. A registrar in the failed set is not added to the advertise table
+again, from any source, for `E` from the time it was first added.
+
+Only a timeout counts as a liveness failure of the registrar towards the ordinary node table. A
+rejection is an answer: it shows that the registrar is reachable.
 
 When registration succeeds, the advertisement remains stored by the registrar until it expires,
-unless it is removed earlier by registrar policy.
+unless it is removed earlier by registrar policy. The advertiser takes the lifetime from the
+`wait-time` of the [REGCONFIRMATION].
 
 Registration responses may include auxiliary ENRs. The advertiser may use these ENRs to update
 its advertise table `B(s)` after validating the ENRs, checking TopDisc capability, and applying
 local usability policy. The recommended auxiliary-ENR selection rule is described in
-[Auxiliary ENR Selection](#auxiliary-enr-selection).
-
-When auxiliary ENRs returned by a registrar are used to update the advertiser's advertise
-table `B(s)`, that registrar may contribute at most one candidate to any given bucket across
-its responses. This prevents a single registrar from repeatedly supplying entries to the
-same bucket.
+[Auxiliary ENR Selection](#auxiliary-enr-selection). The current implementation accepts at most 8
+auxiliary ENRs per registration request.
 
 ### Renewal
 
-An admitted advertisement remains stored until its expiry time `E`.
+An admitted advertisement remains stored until its expiry time `E`. Because a registrar does not
+refresh the expiry of an advertisement it already holds (see [Ad Cache](#ad-cache)), an
+advertisement cannot be extended by registering again before it expires.
 
-Advertisers should renew advertisements before expiry, or continuously maintain enough active and
-pending registrations, to preserve the target number of placements in each bucket.
-
-A renewal is a new registration attempt for an advertisement already admitted or about to expire.
-The exact renewal encoding and the treatment of duplicate registrations are specified by the
-wire-format document.
-
-If a renewal fails, the advertiser may attempt to register with another eligible registrar in the
-same bucket.
+Renewal is therefore a new registration after expiry, not tied to the registrar that held the
+advertisement. In the current implementation, when an advertisement expires, the registrar leaves
+the bucket and the free slot goes to a standby candidate, which may be a different registrar. The
+previous registrar becomes a candidate again only when it is offered again, from the node table or
+as an auxiliary ENR. Until the new registration is admitted, the bucket holds one advertisement
+fewer than `K_register`.
 
 Advertisers should treat registrations as soft state. The target is not to permanently bind a
 service to a fixed set of registrars, but to maintain sufficient active or pending placements across
@@ -853,12 +977,55 @@ the observed advertisement yield, i.e., the number of advertisement ENRs returne
 registrars: low yield moves the active bucket closer to `s`, sufficient yield keeps it at the
 same distance, and consistently full responses move it farther from `s`.
 
+A lookup runs as a sequence of search passes. Each pass fills a fresh search table from the
+ordinary node table, starts at the active bucket chosen by the previous pass, and keeps its
+own yield samples. The discoverer sends one query at a time. The rules below for pass length,
+pass spacing, re-asking and result delivery are local policy: they do not change what is sent
+for a single query, but they set how much load a discoverer places on registrars. The values
+given are the recommended ones.
+
+#### Registrar Selection
+
 While a search pass remains active, each query first selects an eligible unqueried registrar from the active bucket. If none is available there, the discoverer considers neighbouring populated search buckets on either side of the active bucket, expanding outward one bucket at a time. When two candidate buckets are equally far from the active bucket, the bucket farther from `s` is considered first. The first bucket containing an eligible unqueried registrar is selected. Querying a registrar from such a fallback bucket does not itself change the active bucket. Therefore,
 the bucket containing the queried registrar may differ from the active bucket. The fallback is only
 a way to obtain another query target when the active bucket has no eligible registrar; the
 search region (active bucket) changes only in response to observed advertisement yield.
 
-For each processed query outcome that counts as a response, the discoverer records one advertisement-yield sample for the responding registrar's bucket. The advertisement-yield sample is the number of advertisement ENRs present in the processed [TOPICNODES] response after response validation, the response-size limit, and advertiser-ID deduplication within that response. A successful response containing no advertisements contributes a yield sample of `0`.
+Within a bucket, the discoverer SHOULD select the registrar pseudo-randomly, so that
+discoverers of the same service do not converge on the same registrars.
+
+The discoverer keeps two sets of registrars across the passes of a lookup. Each set holds a
+registrar for `E` from the time it was first added; adding it again does not extend that time.
+
+- The **asked set** holds registrars that answered a query. A registrar in the asked set is
+  not an unqueried candidate in later passes.
+- The **failed set** holds registrars whose query failed. A registrar in the failed set is
+  not inserted into the search table, from any source, until it leaves the set.
+
+A query fails when the registrar is unreachable, times out, or its response ends in an error
+before any record (advertisement or auxiliary ENR) has arrived. A failed registrar is removed
+from the search table. A response that ends in an error after some records have arrived is a
+partial response; the registrar counts as having answered.
+
+A registrar in the asked set that is offered to the search table again, from the node table
+or as an auxiliary ENR, becomes a spare. When no search bucket holds an unqueried candidate,
+the pass MAY re-ask one spare. The recommended choice is the spare whose last query is the
+oldest, since its ad cache is the most likely to have changed. At most one spare is re-asked
+per pass. A registrar that answered or failed during the current pass is not asked again in
+that pass.
+
+#### Advertisement Yield
+
+For each complete response, the discoverer records one advertisement-yield sample for the
+responding registrar's bucket. The sample is the number of advertisement records in the
+[TOPICNODES] responses after per-record validation, the `F_return` size limit and
+de-duplication by node ID within the response, and before the `ng` capability check and the
+result filter described below. A complete response containing no advertisements contributes
+a yield sample of `0`.
+
+A partial response contributes a yield sample only if its count reaches `F` on its own. Its
+count is a lower bound: it can show that yield is sufficient, but not that it is low. A failed
+query contributes no yield sample.
 
 During a search pass, each bucket retains its four most recent yield samples. A response does not change the active bucket until the responding bucket has at least two samples. Let `x` be those samples sorted in ascending order, and `m` their count, where `2 <= m <= 4`. With zero-based indexing and integer division:
 
@@ -869,50 +1036,108 @@ For odd `m`, `lower == upper` is the ordinary median. For even `m`, they are the
 and are not averaged. Let `F = SearchYieldFloor`, the minimum advertisement yield considered sufficient to keep the
 responding bucket as the active bucket for subsequent queries. The current value is `F = 8`.
 `F_return = 16` is the maximum number of advertisement ENRs that a registrar may return in one
-query response. For responding bucket index `b` and closest search-bucket index `last`, update the
-active bucket as follows:
+query response. For responding bucket index `b` and closest search-bucket index `last`, compute
+the candidate bucket `next` as follows:
 
     if lower >= F_return:
-        active = max(0, b - 1)
+        next = max(0, b - 1)
     else if upper >= F:
-        active = b
+        next = b
     else if upper == 0:
-        active = min(last, b + 4)
+        next = min(last, b + 4)
     else:
         jump = ceil(log2(F / upper))
-        active = min(last, b + min(jump, 4))
+        next = min(last, b + min(jump, 4))
 
-The division in `F / upper` is real division. If the recent yield samples are consistently full (`lower >= F_return`), the active bucket moves one
+The division in `F / upper` is real division. If the recent yield samples are consistently full (`lower >= F_return`), the search moves one
 bucket farther from `s`. If the observed yield is sufficient but not consistently full
-(`upper >= F`), the responding bucket becomes the active bucket. If the yield is zero
-(`upper == 0`), the active bucket moves four buckets closer to `s`. Otherwise, when
+(`upper >= F`), the responding bucket is kept. If the yield is zero
+(`upper == 0`), the search moves four buckets closer to `s`. Otherwise, when
 `0 < upper < F`, it moves between one and four buckets closer, with lower yield causing a
-larger move. All moves are limited to valid bucket indices. The adaptation rule is applied to the bucket of the responding registrar, which may differ from the active bucket if the query used a fallback registrar. In that case, the response contributes a yield sample to the fallback bucket. Once that bucket has enough samples, the adaptation rule may make it, or a nearby bucket, the new active bucket.
+larger move. All moves are limited to valid bucket indices.
 
-Once the active bucket has at least two yield samples and no unqueried candidate, the pass ends
-instead of selecting another fallback. If no unqueried candidates remain in the active bucket or
-any fallback bucket, at most one previously queried registrar may be retried during that pass.
+The rule is evaluated on the samples of the responding registrar's bucket `b`, which differs
+from the active bucket `a` when the query used a fallback registrar. The active bucket becomes
+`next` only if one of the following holds:
 
-If the pass exhausts all candidates before the active bucket has accumulated enough yield samples
-for adaptation, the next pass starts one bucket closer to `s`, unless it is already the closest
-bucket. Otherwise, the same active bucket is retained.
+1. `b` is at most `SearchAuxRadius` buckets from `a`;
+2. `b` is farther from `s` than `a` (`b < a`) and `next <= b`; or
+3. `b` is closer to `s` than `a` (`b > a`) and `next > b`.
+
+Otherwise the sample is kept, but the active bucket does not change. Advertisement density
+grows toward `s`, so a distant fallback bucket can only move the search in one direction:
+sufficient yield farther out pulls the search out to that bucket or beyond, and low yield
+closer in pushes it past that bucket. Low yield farther out, or sufficient yield closer in, is
+what density alone predicts and does not move the active bucket.
+
+#### Pass Transitions
+
+A pass ends when no query is in flight, no result waits to be delivered, and one of the
+following holds:
+
+1. `SearchPassQueries` queries of the pass have completed, answered or failed (provisional,
+   see [Parameters](#parameters));
+2. the active bucket has no unqueried candidate and holds at least two yield samples; or
+3. no search bucket holds an unqueried candidate and no spare can be re-asked.
+
+The next pass starts at the active bucket if the pass ended by condition 1 or 2, or if a
+yield sample changed or confirmed the active bucket during the pass. Otherwise the pass ran
+out of candidates before the active bucket could decide, and the next pass starts one bucket
+closer to `s`, unless the active bucket is already the closest bucket. Two exceptions apply:
+
+- If the active bucket was queried during the pass, every query to it failed, and no yield
+  sample placed it, the next pass retries the same bucket. Only one such retry pass is made;
+  if it ends the same way, the following pass starts one bucket closer to `s`.
+- If the pass started at the closest bucket, would start the next pass there as well, and
+  received no advertisement from any registrar, the next pass starts at the farthest bucket,
+  index `0`. This lets a lookup find the first advertisers of a service that had none.
 
 Ending a pass does not end the overall lookup. The search continues with new passes, each starting
 with fresh yield samples, until the caller closes the lookup or the discovery system shuts down.
 
+Each pass starts at least `SearchPassGap` after the previous pass started. A pass is idle if
+it delivered no result to the caller and either received no advertisements or leaves the next
+pass starting at the same bucket as itself.
+After `k` consecutive idle passes, the next pass starts at least
+`min(SearchPassBackoff, SearchPassGap * 2^k)` after the previous one. A pass that is not idle
+resets the spacing to `SearchPassGap`. The discoverer SHOULD back off this way; the
+recommended values are `SearchPassGap = 2 sec` and `SearchPassBackoff = 60 sec`
+(provisional, see [Parameters](#parameters)).
+
+#### Result Delivery
+
 A registrar returns advertisements for service `s` in [TOPICNODES] responses. The discoverer
-validates the returned advertisements, extracts the advertised ENRs, and de-duplicates them by
-advertiser identity. Advertisements are candidate results for the target service. The caller may
+validates the returned advertisements, discards those whose ENR does not advertise a supported
+`ng` version, and extracts the advertised ENRs. Advertisements are candidate results for the target service. The caller may
 stop lookup when it has collected enough distinct advertisers for its local or service-specific
 purpose. This target is denoted `F_lookup` in this document and is determined by the application,
 service binding, or local implementation policy. It is a caller-side result target, and has no protocol-wide fixed default. A caller stopping
 before reaching its target retains the valid advertisers collected so far. The search iterator
 continues through successive passes until the caller closes it or the discovery system shuts down.
 
-If a queried
-registrar is unreachable, times out, or returns a malformed response, the discoverer treats that
-query as failed and continues with another candidate. Repeated failures may cause the registrar to
-be temporarily excluded from operations.
+The discoverer SHOULD NOT deliver the same advertiser repeatedly across passes. It records
+each delivered node, with its ENR sequence number, in a result filter for `E` after the
+delivery. While a node is recorded, it is not delivered again, except once with an ENR whose
+sequence number is higher than the recorded one. After that re-delivery the node is not
+delivered again until its entry expires. Within one pass, each node is delivered at most once.
+The recommended filter capacity is `SearchFilterSize = 50,000` entries (provisional, see
+[Parameters](#parameters)); when the filter is full, the entry that expires first is dropped.
+
+The discoverer SHOULD mix results across registrars, so that the first results of a pass do
+not all come from one registrar. Within a pass, results that pass the filter are queued per
+responding registrar. Queued results are released once `SearchMixRegistrars` registrars have
+replied with results in the pass, or once the first queued result has waited
+`SearchMixWait`; the condition is checked whenever a query completes. Released results go out
+in rounds, one result from each registrar with results waiting, in the order the registrars
+first replied. A round with results from a single registrar waits until those results have
+waited `SearchMixWait`. A node queued by several registrars is delivered once, with the ENR
+that has the highest sequence number. When the pass ends, every queued result is released in
+the same rounds. The recommended values are `SearchMixRegistrars = 5` and
+`SearchMixWait = 5 sec` (provisional, see [Parameters](#parameters)).
+
+The discoverer SHOULD NOT send a new query while `SearchUnreadLimit` or more results wait
+unread by the caller, and resumes querying when the caller reads. The recommended value is
+`SearchUnreadLimit = 16`, equal to `F_return` (provisional, see [Parameters](#parameters)).
 
 Lookup responses may also include auxiliary ENRs in [NODES] responses. These ENRs are not lookup
 results; they are auxiliary routing information used to improve the discoverer's search table
@@ -949,22 +1174,33 @@ to search buckets around the current active bucket. `SearchAuxRadius` controls t
 its current value is `1`. The request therefore normally includes the active bucket and its
 neighbouring search buckets, subject to valid indices and available capacity. A bucket has space
 when it holds fewer than `SearchBucketSize` candidates. This replenishes registrar candidates in
-the service-distance region that adaptive lookup currently prefers.
+the service-distance region that adaptive lookup currently prefers. The discoverer lists the
+topic-distances from farthest to closest to `s`. A registrar that caps auxiliary ENRs serves
+the earliest listed distances first (see [Auxiliary ENR Selection](#auxiliary-enr-selection)).
 
 An ENR learned through lookup is eligible for insertion into the search table only if:
 
 1. the ENR is valid;
 2. the ENR advertises a supported TopDisc version;
-3. the node is not temporarily excluded by local TopDisc usability policy;
+3. the node is not temporarily excluded by local TopDisc usability policy, and is not in the
+lookup's failed set;
 4. the advertised IP address passes the ordinary Discovery v5 address-validation checks and any
 configured network restrictions;
 5. the ENR advertises a UDP port greater than `1024`;
-6. the node is not the discoverer itself or a duplicate candidate;
+6. the node is not the discoverer itself or a duplicate candidate, has not answered or failed
+a query in the current pass, and is not in the lookup's asked set (such a node becomes a
+spare, see [Lookup Procedure](#lookup-procedure));
 7. the destination search bucket has available capacity; and
 8. inserting the node does not violate the bucket's IP-prefix diversity restriction.
 
-As part of the IP-prefix diversity restriction for IPv4, the current implementation allows at most one candidate from the same `/24` prefix
-in a search bucket; LAN addresses are exempt from this restriction.
+As part of the IP-prefix diversity restriction, the current implementation allows at most one
+candidate from the same `/24` prefix in a search bucket; LAN addresses are exempt from this
+restriction. As in the advertise table, the limit applies to the node's endpoint address, IPv4 or
+IPv6, with the same prefix length for both families. The search table is filled
+afresh for each pass, so the restriction holds within one pass. A registrar that answered keeps
+its prefix slot for the rest of the pass, so another node from the same `/24` cannot take its
+place; a registrar whose query failed releases its slot. This differs from the advertise table,
+which keeps its prefix accounting for as long as the service is advertised.
 
 When processing auxiliary ENRs from a single response, at most one candidate is admitted into
 any given search bucket. This limits the contribution of a single responding registrar to that
@@ -976,22 +1212,54 @@ according to the TopDisc failure-handling rules.
 
 ## Parameters
 
-The TopDisc algorithms use the following parameters:
+This section lists every TopDisc parameter. The status column gives the rule that applies to it:
 
-| Parameter          | Meaning                                                                       | Default        |
-|--------------------|-------------------------------------------------------------------------------|----------------|
-| `K_register`       | Target number of active or pending registrations per bucket                   | `5`            |
-| `F_return`         | Maximum number of advertisements returned for one topic query                 | `16`           |
-| `F_lookup`         | Caller/application-defined target number of distinct advertiser results       | Caller-defined |
-| `SearchBucketSize` | Maximum candidate capacity of one search bucket                               | `8`            |
-| `SearchYieldFloor` | Yield threshold for staying at the responding bucket instead of moving closer | `8`            |
-| `SearchAuxRadius`  | Neighbourhood around the active bucket for auxiliary registrar requests       | `1`            |
-| `E`                | Advertisement expiry duration                                                 | `15 min`       |
-| `C`                | Registrar ad cache capacity                                                   | `1000`         |
-| `δ`                | Registration retry window duration                                            | `5 sec`      |
-| `Pocc`             | Occupancy exponent in the waiting-time function                               | `10`           |
-| `G`                | Safety constant in the waiting-time function                                  | `10^-7`        |
+- **MUST**: the value is visible on the wire or shared between nodes; all implementations use it.
+- **SHOULD**: the behaviour is recommended to all implementations, with the given value.
+- **Local policy**: the value is an implementation choice; the given value is the recommended one.
 
+| Parameter             | Meaning                                                                       | Value                   | Status                  | Rationale                     |
+|-----------------------|-------------------------------------------------------------------------------|-------------------------|-------------------------|-------------------------------|
+| `E`                   | Advertisement lifetime; also the lifetime of the asked and failed sets        | `15 min`                | MUST                    | [Ad cache][r-ad-cache]        |
+| `C`                   | Registrar ad cache capacity, a hard limit                                     | `5,000` (provisional)   | Local policy            | [Ad cache][r-ad-cache]        |
+| `δ`                   | Registration window after a ticket's waiting time                             | `5 sec`                 | MUST                    | [Answers][r-answer]           |
+| `ε`                   | Late grace after the window in which a ticket is still credited               | `10 sec`                | Local policy            | [Answers][r-answer]           |
+| `W_min`               | Admission slack and minimum quote; shorter quotes are waited as `W_min`       | `1 sec`                 | SHOULD; advertiser MUST | [Answers][r-answer]           |
+| `UsedTicketTTL`       | How long a credited ticket is remembered                                      | `δ + ε`                 | MUST (at least)         | [Answers][r-answer]           |
+| `UsedTicketLimit`     | Maximum number of remembered credited tickets                                 | `16,384`                | Local policy            | [Answers][r-answer]           |
+| `TicketKeyLifetime`   | Lifetime of a ticket MAC key after its last use                               | `6 h`                   | Local policy            | —                             |
+| `TicketKeyUses`       | Tickets sealed with one MAC key before a new key is made                      | `100,000`               | Local policy            | —                             |
+| `Wbase`               | Base waiting-time factor, `base(0) = Wbase * E`                               | `0.1` (provisional)     | Local policy            | [Waiting time][r-wait]        |
+| `Pocc`                | Occupancy exponent in the waiting-time function                               | `10`                    | Local policy            | [Waiting time][r-wait]        |
+| `maxWaitTime`         | Cap on a computed waiting time and on recorded lower bounds                   | `24 h` (provisional)    | Local policy            | [Waiting time][r-wait]        |
+| `AuxENRLimit`         | Topic-distances served, and auxiliary ENRs accepted, per request              | `8`                     | Local policy            | [Aux ENRs][r-aux]             |
+| `F_return`            | Maximum number of advertisements returned for one topic query                 | `16`                    | SHOULD                  | [Security][r-security]        |
+| `K_register`          | Target number of waiting or registered registrars per advertise bucket        | `10` (provisional)      | Local policy            | [Adaptive search][r-adaptive] |
+| `RegTableDepth`       | Number of advertise-table buckets                                             | `18`                    | Local policy            | [Adaptive search][r-adaptive] |
+| `RegStandbyLimit`     | Maximum number of standby candidates per advertise bucket                     | `20`                    | Local policy            | [Scheduling][r-schedule]      |
+| `RegBucketPrefix`     | Prefix length for the one-registrar-per-prefix limit in advertise buckets     | `/24`, `1` per bucket   | Local policy            | [Security][r-security]        |
+| `RegAttemptBudget`    | Largest single or total quoted waiting time before an attempt is abandoned    | `1.5 * E` (provisional) | SHOULD                  | [Scheduling][r-schedule]      |
+| `RegSenders`          | Concurrent registration requests per advertised service                       | `4`                     | Local policy            | [Scheduling][r-schedule]      |
+| `RegLoopMinPeriod`    | Minimum period between re-reads of the node table by the advertiser           | `2 sec`                 | Local policy            | [Scheduling][r-schedule]      |
+| `F_lookup`            | Caller/application-defined target number of distinct advertiser results       | Caller-defined          | Local policy            | —                             |
+| `SearchTableDepth`    | Number of search-table buckets                                                | `18`                    | Local policy            | [Adaptive search][r-adaptive] |
+| `SearchBucketSize`    | Maximum candidate capacity of one search bucket                               | `8`                     | Local policy            | [Adaptive search][r-adaptive] |
+| `SearchBucketPrefix`  | Prefix length for the one-registrar-per-prefix limit in search buckets        | `/24`, `1` per bucket   | Local policy            | [Security][r-security]        |
+| `SearchYieldFloor`    | Yield threshold for staying at the responding bucket instead of moving closer | `8`                     | Local policy            | [Adaptive search][r-adaptive] |
+| `SearchYieldWindow`   | Yield samples kept per search bucket                                          | `4`                     | Local policy            | [Adaptive search][r-adaptive] |
+| `SearchMaxJump`       | Largest move toward `s` after one yield sample, in buckets                    | `4`                     | Local policy            | [Adaptive search][r-adaptive] |
+| `SearchAuxRadius`     | Neighbourhood around the active bucket for auxiliary registrar requests       | `1`                     | Local policy            | [Aux ENRs][r-aux]             |
+| `SearchPassQueries`   | Maximum number of queries in one search pass                                  | `32` (provisional)      | Local policy            | [Passes][r-passes]            |
+| `SearchPassGap`       | Minimum spacing between the starts of consecutive search passes               | `2 sec` (provisional)   | SHOULD                  | [Passes][r-passes]            |
+| `SearchPassBackoff`   | Maximum spacing between search passes after idle passes                       | `60 sec` (provisional)  | SHOULD                  | [Passes][r-passes]            |
+| `SearchUnreadLimit`   | Unread results at which the discoverer stops sending queries                  | `16` (provisional)      | SHOULD                  | [Passes][r-passes]            |
+| `SearchFilterSize`    | Maximum number of entries in the lookup result filter                         | `50,000` (provisional)  | SHOULD                  | [Filter and mix][r-filter]    |
+| `SearchMixRegistrars` | Registrars that must reply with results before mixed results are released     | `5` (provisional)       | SHOULD                  | [Filter and mix][r-filter]    |
+| `SearchMixWait`       | Maximum wait before mixed results are released                                | `5 sec` (provisional)   | SHOULD                  | [Filter and mix][r-filter]    |
+
+Values marked *(provisional)* follow the current implementation and are pending the
+parameter decision in datahop/go-ethereum#12. The safety constant `G` of [DISC-NG paper] is not
+used; see [Waiting-Time Function](#waiting-time-function).
 
 ## Implementation Considerations
 
@@ -1024,14 +1292,6 @@ The exact encoding of TopDisc messages, ticket signatures, request identifiers, 
 returned advertisements, neighbour ENRs, and any application-specific advertisement payload is
 specified in the wire-format document.
 
-[FINDNODE]: ./discv5-wire.md#findnode-request-0x03
-[REGTOPIC]: ./discv5-wire.md#regtopic-request-0x07
-[REGCONFIRMATION]: ./discv5-wire.md#regconfirmation-response-0x08
-[TOPICQUERY]: ./discv5-wire.md#topicquery-request-0x09
-[TOPICNODES]: ./discv5-wire.md#topicnodes-response-0x0a
-[NODES]: ./discv5-wire.md#nodes-response-0x04
-[ng ENR entry]: ../enr-entries/ng.md
-
 ### References
 
 - [DISC-NG paper]
@@ -1039,3 +1299,19 @@ specified in the wire-format document.
 
 [DISC-NG paper]: https://doi.org/10.1109/EuroSP60621.2024.00019
 [RFC 5869]: https://www.rfc-editor.org/rfc/rfc5869
+[FINDNODE]: ./discv5-wire.md#findnode-request-0x03
+[REGTOPIC]: ./discv5-wire.md#regtopic-request-0x07
+[REGCONFIRMATION]: ./discv5-wire.md#regconfirmation-response-0x08
+[TOPICQUERY]: ./discv5-wire.md#topicquery-request-0x09
+[TOPICNODES]: ./discv5-wire.md#topicnodes-response-0x0a
+[NODES]: ./discv5-wire.md#nodes-response-0x04
+[ng ENR entry]: ../enr-entries/ng.md
+[r-ad-cache]: ./discv5-rationale.md#why-use-an-ad-cache
+[r-answer]: ./discv5-rationale.md#why-answer-every-registration-request
+[r-wait]: ./discv5-rationale.md#why-change-the-waiting-time-function
+[r-aux]: ./discv5-rationale.md#why-return-auxiliary-enrs
+[r-security]: ./discv5-rationale.md#topdisc-security-considerations
+[r-adaptive]: ./discv5-rationale.md#why-use-adaptive-search
+[r-schedule]: ./discv5-rationale.md#why-schedule-registrations-per-bucket
+[r-passes]: ./discv5-rationale.md#why-search-in-passes
+[r-filter]: ./discv5-rationale.md#why-filter-and-mix-lookup-results

@@ -259,9 +259,20 @@ the recipient: when returning auxiliary ENRs, the recipient should prefer ENRs w
 distance to `topic` matches one of the listed values, so the response helps the sender
 populate its service table.
 
-REGTOPIC is always answered with a single REGCONFIRMATION response. The recipient may
-additionally send zero or more NODES responses carrying auxiliary ENRs selected from its
-view of the service table.
+The list is in priority order: a recipient that caps the number of auxiliary ENRs serves the
+earliest listed distances first.
+
+REGTOPIC is always answered with a single REGCONFIRMATION response, including requests that
+the registrar rejects and requests carrying an invalid, expired or already used ticket. The
+recipient may additionally send zero or more NODES responses carrying auxiliary ENRs
+selected from its view of the service table. It sends no NODES responses when it rejects
+the request or answers a ticket presented before its window.
+
+The registrar MUST reject the request if `ENR` is not a valid node record, if its node ID
+is not the sender's, if it holds no address of the packet's address family, if that address
+differs from the packet's source address, or if it holds an address of the other family that
+is not publicly routable. Discoverers dial the advertised record, not the packet source, so
+the record's addresses must be ones the registrar has seen or that can be reached.
 
 See the [theory section on tickets] and [theory section on registrar admission control]
 for the registrar's waiting-time semantics.
@@ -274,20 +285,34 @@ for the registrar's waiting-time semantics.
     total        = total number of responses (REGCONFIRMATION + NODES) to the request
     ticket       = ticket issued by the registrar for the next attempt;
                    empty byte array (RLP: `0x80`) when the registration was admitted
+                   or rejected
     wait-time    = milliseconds to wait before submitting the next REGTOPIC attempt
                    with the returned `ticket`. When `ticket` is empty, `wait-time` carries
-                   the advertisement lifetime instead.
+                   the advertisement lifetime instead, or `0` for a rejection.
 
 REGCONFIRMATION is the response to REGTOPIC. It is sent immediately by the registrar and
-plays two roles, distinguished by the length of `ticket`:
+plays three roles, distinguished by `ticket` and `wait-time`:
 
-- If `ticket` is the empty byte array, the advertisement has been admitted to the
-  registrar's ad cache. `wait-time` indicates the advertisement lifetime; the advertiser
-  should renew before that lifetime elapses to remain in the cache.
+- If `ticket` is the empty byte array and `wait-time` is non-zero, the advertisement is in
+  the registrar's ad cache. `wait-time` indicates the advertisement lifetime. The advertiser
+  caps it at its own advertisement lifetime `E`.
 - If `ticket` is non-empty, the advertisement was not admitted on this attempt. The
   sender must wait at least `wait-time` milliseconds and re-attempt the registration with
-  the returned `ticket`. See the [theory section on tickets] and the [theory section on
-  the waiting-time function].
+  the returned `ticket`. A registrar SHOULD NOT quote a `wait-time` below `W_min`
+  (1,000 ms). An advertiser MUST treat a smaller `wait-time` as `W_min`: it waits at least
+  `W_min` before retrying and keeps using the registrar. See the [theory section on
+  tickets] and the [theory section on the waiting-time function].
+- If `ticket` is the empty byte array and `wait-time` is `0`, the registrar rejected the
+  request. `total` is `1`. The advertiser MUST NOT treat the advertisement as admitted and
+  SHOULD NOT retry this registrar with the same record. A rejection shows that the registrar
+  is reachable; it is not a liveness failure.
+
+When the sender presents a ticket before its window, the registrar answers with the same
+`ticket` bytes it received and the remaining wait in `wait-time`, and sends no NODES
+responses, as described in the [theory section on tickets].
+
+An advertiser MUST accept any `wait-time` value. A value too large for its local duration
+type is saturated to the largest value it can hold, which exceeds any attempt budget.
 
 The `total` field announces the total number of responses (this REGCONFIRMATION plus any
 NODES messages carrying auxiliary ENRs) that the registrar will send for this request.
@@ -308,10 +333,13 @@ auxiliary ENRs selected from its service-table view (see NODES).
 
 The `topic-distance` list serves the same purpose as in REGTOPIC: it tells the recipient
 which log2 distances from `topic` the sender's service table still has room for, so the
-recipient can choose useful auxiliary ENRs to include in its NODES responses.
+recipient can choose useful auxiliary ENRs to include in its NODES responses. The list is in
+priority order: a recipient that caps the number of auxiliary ENRs serves the earliest listed
+distances first. A discoverer lists the distances from farthest to closest to `topic`.
 
-See the [theory section on lookup responses] for the discoverer-side termination semantics
-(distinct-advertisers count) and the [theory section on parameters] for `Freturn`.
+See the [theory section on lookup responses] for the registrar side, the [theory section on
+the lookup procedure] for how the discoverer uses the responses, and the [theory section on
+parameters] for `F_return`.
 
 ### TOPICNODES Response (0x0A)
 
@@ -329,10 +357,10 @@ NODES messages carrying auxiliary ENRs) the recipient will send for this request
 Implementations may place a limit on the allowed maximum for `total`; if exceeded,
 additional responses may be ignored.
 
-The recipient should return only non-expired advertisements from its ad cache. When the
-ad cache contains more than `Freturn` advertisements for the topic, the recipient
-selects which advertisements to return; the exact selection policy is implementation
-defined.
+The recipient MUST NOT return expired advertisements from its ad cache. When the
+ad cache contains more than `F_return` advertisements for the topic, the recipient
+SHOULD return a pseudo-random subset of at most `F_return` of them, as specified in the
+[theory section on lookup responses].
 
 TOPICNODES carries only registered advertisers. Auxiliary routing information for the
 sender's service table is carried separately via NODES responses.
@@ -347,6 +375,7 @@ A collection of test vectors for this specification can be found at
 [theory section on registrar admission control]: ./discv5-theory.md#admission-control
 [theory section on the waiting-time function]: ./discv5-theory.md#waiting-time-function
 [theory section on lookup responses]: ./discv5-theory.md#lookup-responses
+[theory section on the lookup procedure]: ./discv5-theory.md#lookup-procedure
 [theory section on parameters]: ./discv5-theory.md#parameters
 [EIP-778]: ../enr.md
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md
