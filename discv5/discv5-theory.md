@@ -300,27 +300,25 @@ procedure on another, closer node.
 
 # Topic-based Service Discovery
 
-Topic-based discovery (**TopDisc**) extends Discovery v5 with a mechanism to discover nodes
-according to their provided services (topics). It allows nodes to advertise participation in a
-service and allows other nodes to discover those advertisements while reusing the existing Node
-Table and ENR mechanisms.
+Topic-based discovery (**TopDisc**), referred to as **DISC-NG** in the accompanying academic paper [DISC-NG paper], extends Discovery v5 with a mechanism to discover nodes according to their provided services (topics). Nodes advertise participation in a service through registration operations, and other nodes discover those advertisements through lookup operations, while reusing the existing Node Table and ENR mechanisms.
 
 ## Co-existence with Node Discovery
 
 The TopDisc system builds on the basic routing of discv5. A TopDisc-capable node first
 joins the network using [FINDNODE] and populates its local node table, learning about
-TopDisc capable nodes. These nodes are then used to bootstrap service tables (see below).
+TopDisc-capable nodes. These nodes are then used to bootstrap service tables (see below).
 As registration and lookup operations proceed, TopDisc-capable nodes can also return
 additional nodes to improve the service tables, as described below.
 
-A TopDisc failure does not by itself imply an ordinary Discovery v5 failure. A node may be usable
-for ordinary node discovery but unusable for registration or lookup. Conversely, a node that
-fails ordinary Discovery v5 liveness checks ceases to be eligible for insertion into service
+Failure of a TopDisc registration or lookup request does not by itself imply an ordinary
+Discovery v5 failure. A node may remain usable for ordinary node discovery even if it is
+temporarily unusable for TopDisc registration or lookup. Conversely, a node that
+fails ordinary Discovery v5 liveness checks ceases to be eligible for insertion into TopDisc service
 tables.
 
 ## ENR Capability
 
-A node indicates support for service discovery messages by including the [ng ENR entry].
+A node indicates support for service discovery messages by including the [ng ENR entry] in its ENR.
 
     ng = <version>
 
@@ -331,19 +329,24 @@ registration or lookup requests.
 
 ## Services and Service Identifiers
 
-TopDisc operates on 32-byte service identifiers. A service identifier denotes a higher-level
-service, subnetwork, overlay, or protocol-specific discovery target.
+TopDisc operates on 32-byte service identifiers. A service identifier represents a higher-level
+service, subnetwork, overlay, or other application-specific discovery target.
 
-Service identifiers are in the same 256-bit identifier space as Node IDs. This allows TopDisc to
+Service identifiers are in the same 256-bit (32-byte) identifier space as Node IDs. This allows TopDisc to
 apply the Node Discovery v5 XOR distance function between service identifiers and node IDs.
 
-The mapping from higher-level service names or application-specific parameters to service
-identifiers is defined by the relevant service binding. Such parameters MAY include, for example,
-protocol name, network name, fork identifier, client capability, subnet identifier, or other
-service-specific values.
+Applications identify a service using a string. This string is hashed to obtain the 32-byte
+service identifier:
 
-This document does not define a canonical derivation rule for service identifiers. The application
-can choose its identifiers freely.
+    s = H(service-string)
+
+The application chooses the service string. It may encode information such as a protocol name,
+network name, fork identifier, capability, subnet identifier, or a combination of such values.
+Nodes referring to the same service must use the same string so that they derive the same
+service identifier.
+
+Once derived, the service identifier is treated as an opaque 32-byte value by the TopDisc
+registration and lookup procedures.
 
 ## Node Roles
 
@@ -374,23 +377,22 @@ reference point used to assign nodes to buckets. In the ordinary node table, a n
 according to `logdistance(self, n)`, where `self` is the local node ID. In a service table, the same
 node `n` is placed according to `logdistance(s, n)`, where `s` is the service identifier.
 
-For each `0 ≤ i < 256`, bucket `bᵢ(s)` contains TopDisc-capable nodes whose node IDs are at
-logarithmic distance `i` from the service identifier:
+Service-table buckets are assigned according to `logdistance(s, n)`. For distinct identifiers,
+this distance ranges from `1` to `256`, with larger values denoting nodes farther from `s`.
+
+For a logarithmic distance `i`:
 
     bᵢ(s) = { n | logdistance(s, n) = i }
 
-Thus, `B(s)` gives the local node a service-centred view of the discovery network. Buckets closer to
-`s` contain nodes whose IDs are closer to the service identifier, while buckets farther from `s`
-contain nodes from progressively larger regions of the key space.
+Thus, `B(s)` gives the local node a service-centred view of the discovery network. Buckets closer
+to `s` contain nodes whose IDs are closer to the service identifier, while buckets farther from
+`s` contain nodes from progressively larger regions of the key space.
 
 A node may maintain a service table for each service identifier for which it performs TopDisc
 operations. Advertisers use `B(s)` as an advertise table for service `s`; discoverers use `B(s)` as
 a search table for service `s`.
 
-The registrar ad cache is separate from service tables. A registrar does not need to maintain `B(s)`
-for every service represented in its ad cache.
-
-### Bootstrap from Ordinary Node Discovery
+### Bootstrapping from Ordinary Node Discovery
 
 A node does not start advertisement placement or lookup from an empty service table.
 
@@ -398,12 +400,8 @@ The node first joins the Node Discovery v5 network using the standard bootstrapp
 populates its ordinary local node table through the existing `PING`, `PONG`, `FINDNODE`, lookup,
 refresh, and liveness mechanisms.
 
-For a service identifier `s`, the initial service table
-
-    B(s) = { b₀(s), b₁(s), ..., b₂₅₅(s) }
-
-is derived from the ordinary node table. When constructing this initial service table,
-implementations should:
+For a service identifier `s`, the initial service table `B(s)` is derived from the ordinary
+node table. When constructing this initial service table, implementations should:
 
 1. take nodes currently known in the ordinary node table;
 2. discard nodes whose ENR does not advertise a supported TopDisc version;
@@ -421,21 +419,18 @@ learned.
 A service table is maintained from two sources:
 
 1. the ordinary Discovery v5 node table; and
-2. **auxiliary ENRs** learned through [NODES] delivered as a response to [TOPICQUERY].
+2. auxiliary ENRs learned through registration and lookup responses.
 
-When a newly verified node advertising TopDisc capability is learned through ordinary discovery, it
-becomes eligible for insertion into relevant service tables.
+When a newly verified node advertising TopDisc capability is learned through ordinary discovery,
+it becomes eligible for insertion into relevant service tables.
 
-Responses to registration and lookup requests may include auxiliary ENRs selected from the
-responder's view of the service table. Such ENRs may be inserted into `B(s)` only after ENR
-validation, capability checking, and any local usability checks.
-
-Over time, this causes `B(s)` to become better aligned with the service identifier than the ordinary
-local node table, while still remaining anchored in ordinary Discovery v5 state.
+Responses to registration and lookup requests may include auxiliary ENRs selected according to
+[Auxiliary ENR Selection](#auxiliary-enr-selection). Such ENRs may be inserted into `B(s)` only
+after ENR validation, capability checking, and any local usability checks.
 
 ### Auxiliary ENR Selection
 
-TopDisc responses may include auxiliary ENRs. Auxiliary ENRs are routing information used by the
+Auxiliary ENRs are routing information used by the
 requester to improve its local service table `B(s)`; they are not service lookup results.
 
 A request may carry a list of topic-distances at which the requester's service table has free space.
@@ -540,7 +535,8 @@ The advertisement digest is:
 
     ad-digest = H(ad)
 
-where `H` is the digest function defined for ticket construction.
+where `H` is the digest function used by the admission-control mechanism to bind registration
+tickets to advertisements. The admission-control and ticket mechanisms are described below.
 
 If future versions allow service-specific advertisement payloads, the advertisement definition
 becomes:
@@ -684,29 +680,50 @@ where `tinit` is the ticket creation time. The advertisement is admitted when `t
 
 ### IP Similarity Tree
 
-Registrars maintain an IP-prefix tree over the IP addresses of admitted advertisements.
+The IP similarity score `score(ad.IP)` used in the waiting-time function is computed
+using an IP similarity tree. The tree measures whether an advertiser's IP address falls
+within prefixes that are already overrepresented in the ad cache. A higher similarity
+score therefore results in a higher registration waiting time.
 
-The tree is used to compute the IP similarity score. Prefixes that are overrepresented in the ad
-cache increase the score, causing advertisements from similar IP prefixes to receive higher waiting
-times.
+Registrars maintain separate IP similarity trees for IPv4 and IPv6. Both trees
+contain addresses from admitted advertisements across all services.
 
-For IPv4, the tree has 32 levels below the root. Each edge corresponds to one bit of the IP address,
-and each vertex stores a counter. The root counter represents the total number of IP addresses
-represented in the ad cache.
+Each edge in an IP similarity tree corresponds to one bit of an IP address. Each vertex
+represents an IP prefix and stores a counter indicating how many addresses are represented
+by that prefix. The root counter gives the total number of addresses in the tree.
 
-To score an IP address, the registrar walks the tree along the bits of the address. At each level,
-the registrar compares the observed counter for the corresponding prefix with the counter expected
-in a perfectly balanced tree. Prefixes that are overrepresented contribute to the score.
+To score an address `x`, let `N` be the number of addresses in the corresponding tree.
+The registrar examines progressively longer prefixes of `x`, walking down the tree starting from the root. For a prefix of length `k`,
+an even distribution of the `N` addresses across the address space would give an expected
+count of:
 
-The resulting score is normalised to the interval `[0, 1]`.
+    N / 2^k
 
-The tree is updated when advertisements are admitted or expire. When an advertisement is admitted,
-counters along the path corresponding to the advertiser's IP address are incremented. When the
-advertisement expires or is removed, those counters are decremented.
+Only prefix lengths for which `2^k <= N` are considered, up to the maximum address
+length. Let `D` be the number of prefix lengths considered.
 
-For IPv6, the same construction applies over 128 address bits. Implementations that support both
-IPv4 and IPv6 should define whether separate trees are maintained or whether addresses are mapped
-into a common representation.
+For each considered prefix length `k`, let `c_k(x)` be the actual number of addresses
+in the tree that share the first `k` bits of `x`. The prefix contributes one point to
+the similarity score if its actual count is greater than the expected count:
+
+    c_k(x) > N / 2^k
+
+The final similarity score is the fraction of the `D` considered prefixes that
+contribute a point:
+
+    score(x) = number of points / D
+
+If `D = 0`, the score is `0`. The score therefore lies in `[0, 1]`. A score closer to
+`1` means that the address belongs to more prefixes that are overrepresented among
+addresses already present in the ad cache.
+
+IPv4 and IPv6 addresses are scored independently using their respective IP similarity
+trees. If an advertisement contains eligible addresses from both families,
+`score(ad.IP)` is the larger of the two scores. If only one eligible address family is
+present, that family's score is used.
+
+Loopback, private, and link-local addresses are not scored. The IP similarity trees are
+updated as advertisements are admitted and removed.
 
 ### Waiting-Time Lower Bound
 
@@ -736,6 +753,10 @@ lower-bound state using a maximum.
 
 ### Advertisement Placement
 
+For advertisement placement, the advertiser uses a compact table with 18 buckets. Logarithmic
+distances `256` through `240` each have a separate bucket, while distances `239` and below share
+the closest bucket.
+
 For each service `s` that a node advertises, the advertiser attempts to maintain up to `K_register`
 active or pending registrations in each bucket of its advertise table `B(s)`.
 
@@ -749,9 +770,9 @@ advertiser does not repeatedly choose the same registrar when filling the same b
 Within a placement cycle, registrar selection should not repeatedly return the same registrar from
 the same bucket.
 
-For each bucket `bᵢ(s)`, while the number of active or pending registrations in that bucket is below
-`K_register`, the advertiser selects a candidate registrar from `bᵢ(s)` and starts a registration
-attempt.
+For each bucket of the compact advertise table, while the number of active or pending
+registrations in that bucket is below `K_register`, the advertiser selects a candidate
+registrar from that bucket and starts a registration attempt.
 
 If no eligible registrar remains in the bucket, the advertiser stops trying to fill that bucket
 during the current placement cycle. The bucket may be attempted again later after the service table
@@ -787,10 +808,15 @@ registrar.
 When registration succeeds, the advertisement remains stored by the registrar until it expires,
 unless it is removed earlier by registrar policy.
 
-Registration responses may include auxiliary ENRs selected from the registrar's view of the service
-table. The advertiser may use these ENRs to update its advertise table `B(s)` after validating the
-ENRs, checking TopDisc capability, and applying local usability policy. The recommended
-auxiliary-ENR selection rule is described in [Auxiliary ENR Selection](#auxiliary-enr-selection).
+Registration responses may include auxiliary ENRs. The advertiser may use these ENRs to update
+its advertise table `B(s)` after validating the ENRs, checking TopDisc capability, and applying
+local usability policy. The recommended auxiliary-ENR selection rule is described in
+[Auxiliary ENR Selection](#auxiliary-enr-selection).
+
+When auxiliary ENRs returned by a registrar are used to update the advertiser's advertise
+table `B(s)`, that registrar may contribute at most one candidate to any given bucket across
+its responses. This prevents a single registrar from repeatedly supplying entries to the
+same bucket.
 
 ### Renewal
 
@@ -814,24 +840,77 @@ the service-centred key space.
 
 ### Lookup Procedure
 
-A discoverer looking for service `s` queries registrars selected from its search table `B(s)`. The
-corresponding wire-format request is specified in [TOPICQUERY]. Lookup proceeds bucket by bucket,
-starting from the bucket furthest from `s` and progressing towards buckets closer to `s`. For each
-bucket `bᵢ(s)`, the discoverer selects candidate registrars from that bucket and queries up to
-`K_lookup` of them.
+For lookup, the discoverer uses a compact search table with 18 buckets, ordered from farthest
+to closest relative to `s`. Logarithmic distances `256` through `240` each have a separate
+search bucket, while distances `239` and below share the closest search bucket. The search
+buckets are indexed from `0` to `17`, where `0` is the farthest and `17` is the closest.
+
+The discoverer maintains an active search bucket, which defines the current search region:
+the service-distance region from which it currently prefers to select registrars for lookup.
+At the start of a new lookup, the farthest search bucket, index `0`, is active. If it contains
+no eligible registrar, the fallback rule below selects a registrar from another populated
+search bucket without itself changing the active bucket. As responses are received, the discoverer updates the active bucket according to
+the observed advertisement yield, i.e., the number of advertisement ENRs returned by queried
+registrars: low yield moves the active bucket closer to `s`, sufficient yield keeps it at the
+same distance, and consistently full responses move it farther from `s`.
+
+While a search pass remains active, each query first selects an eligible unqueried registrar from the active bucket. If none is available there, the discoverer considers neighbouring populated search buckets on either side of the active bucket, expanding outward one bucket at a time. When two candidate buckets are equally far from the active bucket, the bucket farther from `s` is considered first. The first bucket containing an eligible unqueried registrar is selected. Querying a registrar from such a fallback bucket does not itself change the active bucket. Therefore,
+the bucket containing the queried registrar may differ from the active bucket. The fallback is only
+a way to obtain another query target when the active bucket has no eligible registrar; the
+search region (active bucket) changes only in response to observed advertisement yield.
+
+For each processed query outcome that counts as a response, the discoverer records one advertisement-yield sample for the responding registrar's bucket. The advertisement-yield sample is the number of advertisement ENRs present in the processed [TOPICNODES] response after response validation, the response-size limit, and advertiser-ID deduplication within that response. A successful response containing no advertisements contributes a yield sample of `0`.
+
+During a search pass, each bucket retains its four most recent yield samples. A response does not change the active bucket until the responding bucket has at least two samples. Let `x` be those samples sorted in ascending order, and `m` their count, where `2 <= m <= 4`. With zero-based indexing and integer division:
+
+    lower = x[(m - 1) / 2]
+    upper = x[m / 2]
+
+For odd `m`, `lower == upper` is the ordinary median. For even `m`, they are the two middle values
+and are not averaged. Let `F = SearchYieldFloor`, the minimum advertisement yield considered sufficient to keep the
+responding bucket as the active bucket for subsequent queries. The current value is `F = 8`.
+`F_return = 16` is the maximum number of advertisement ENRs that a registrar may return in one
+query response. For responding bucket index `b` and closest search-bucket index `last`, update the
+active bucket as follows:
+
+    if lower >= F_return:
+        active = max(0, b - 1)
+    else if upper >= F:
+        active = b
+    else if upper == 0:
+        active = min(last, b + 4)
+    else:
+        jump = ceil(log2(F / upper))
+        active = min(last, b + min(jump, 4))
+
+The division in `F / upper` is real division. If the recent yield samples are consistently full (`lower >= F_return`), the active bucket moves one
+bucket farther from `s`. If the observed yield is sufficient but not consistently full
+(`upper >= F`), the responding bucket becomes the active bucket. If the yield is zero
+(`upper == 0`), the active bucket moves four buckets closer to `s`. Otherwise, when
+`0 < upper < F`, it moves between one and four buckets closer, with lower yield causing a
+larger move. All moves are limited to valid bucket indices. The adaptation rule is applied to the bucket of the responding registrar, which may differ from the active bucket if the query used a fallback registrar. In that case, the response contributes a yield sample to the fallback bucket. Once that bucket has enough samples, the adaptation rule may make it, or a nearby bucket, the new active bucket.
+
+Once the active bucket has at least two yield samples and no unqueried candidate, the pass ends
+instead of selecting another fallback. If no unqueried candidates remain in the active bucket or
+any fallback bucket, at most one previously queried registrar may be retried during that pass.
+
+If the pass exhausts all candidates before the active bucket has accumulated enough yield samples
+for adaptation, the next pass starts one bucket closer to `s`, unless it is already the closest
+bucket. Otherwise, the same active bucket is retained.
+
+Ending a pass does not end the overall lookup. The search continues with new passes, each starting
+with fresh yield samples, until the caller closes the lookup or the discovery system shuts down.
 
 A registrar returns advertisements for service `s` in [TOPICNODES] responses. The discoverer
 validates the returned advertisements, extracts the advertised ENRs, and de-duplicates them by
-advertiser identity. Advertisements are candidate results for the target service. The lookup
-terminates when the discoverer has collected enough distinct advertisers for its local or
-service-specific purpose, or when no unqueried registrars remain. This local target is denoted
-`F_lookup` in this document. The value of `F_lookup` is determined by the application, service
-binding, or local implementation policy, rather than by the TopDisc lookup procedure itself. If
-fewer than `F_lookup` advertisers are found before all available candidate registrars are exhausted,
-the lookup returns the valid advertisers collected so far.
+advertiser identity. Advertisements are candidate results for the target service. The caller may
+stop lookup when it has collected enough distinct advertisers for its local or service-specific
+purpose. This target is denoted `F_lookup` in this document and is determined by the application,
+service binding, or local implementation policy. It is a caller-side result target, and has no protocol-wide fixed default. A caller stopping
+before reaching its target retains the valid advertisers collected so far. The search iterator
+continues through successive passes until the caller closes it or the discovery system shuts down.
 
-The same registrar should not be queried repeatedly during a single lookup unless the implementation
-has exhausted other candidates and chooses to retry according to local policy. If a queried
+If a queried
 registrar is unreachable, times out, or returns a malformed response, the discoverer treats that
 query as failed and continues with another candidate. Repeated failures may cause the registrar to
 be temporarily excluded from operations.
@@ -849,12 +928,12 @@ and auxiliary ENRs using the response format defined for `TOPICQUERY` in the wir
 
 The registrar MUST NOT return expired advertisements. If more than `F_return` advertisements for the
 service are present in its ad cache, the registrar SHOULD return a pseudo-random subset of at most
-`Freturn` advertisements. The selection procedure SHOULD avoid deterministic bias towards the same
+`F_return` advertisements. The selection procedure SHOULD avoid deterministic bias towards the same
 advertisers across repeated lookup requests.
 
-A registrar may also return auxiliary ENRs selected from its view of the service table for `s`.
-These ENRs are not lookup results; they are auxiliary routing information used to improve future
-registration and lookup operations.
+A registrar may also return auxiliary ENRs selected according to
+[Auxiliary ENR Selection](#auxiliary-enr-selection). These ENRs are not lookup results; they are
+auxiliary routing information used to improve future registration and lookup operations.
 
 The requester uses returned auxiliary ENRs to update its local service table `B(s)` after validating
 the ENRs, checking TopDisc capability, and applying local usability policy. The exact
@@ -863,34 +942,57 @@ wire-format document.
 
 ### Updating the Search Table During Lookup
 
-The discoverer updates `B(s)` using auxiliary ENRs returned in lookup responses.
+The discoverer updates `B(s)` using auxiliary ENRs returned in [NODES] responses to lookup requests.
+These ENRs are registrar candidates for the search table, not advertisement lookup results.
 
-An ENR learned through lookup is eligible for insertion into `B(s)` only if:
+During adaptive lookup, [TOPICQUERY] requests auxiliary candidates for topic-distances corresponding
+to search buckets around the current active bucket. `SearchAuxRadius` controls this neighbourhood;
+its current value is `1`. The request therefore normally includes the active bucket and its
+neighbouring search buckets, subject to valid indices and available capacity. A bucket has space
+when it holds fewer than `SearchBucketSize` candidates. This replenishes registrar candidates in
+the service-distance region that adaptive lookup currently prefers.
+
+An ENR learned through lookup is eligible for insertion into the search table only if:
 
 1. the ENR is valid;
-2. the ENR advertises TopDisc capability;
+2. the ENR advertises a supported TopDisc version;
 3. the node is not temporarily excluded by local TopDisc usability policy;
-4. the node satisfies ordinary Discovery v5 liveness requirements, or is scheduled for ordinary
-   liveness verification.
+4. the advertised IP address passes the ordinary Discovery v5 address-validation checks and any
+configured network restrictions;
+5. the ENR advertises a UDP port greater than `1024`;
+6. the node is not the discoverer itself or a duplicate candidate;
+7. the destination search bucket has available capacity; and
+8. inserting the node does not violate the bucket's IP-prefix diversity restriction.
 
-Implementations may insert learned ENRs immediately with an unverified flag and verify liveness
-asynchronously.
+As part of the IP-prefix diversity restriction for IPv4, the current implementation allows at most one candidate from the same `/24` prefix
+in a search bucket; LAN addresses are exempt from this restriction.
+
+When processing auxiliary ENRs from a single response, at most one candidate is admitted into
+any given search bucket. This limits the contribution of a single responding registrar to that
+bucket within one response.
+
+A successful ordinary Discovery v5 liveness check is not required before insertion. If the node
+subsequently fails to respond to a TopDisc request, it may be removed or temporarily excluded
+according to the TopDisc failure-handling rules.
 
 ## Parameters
 
 The TopDisc algorithms use the following parameters:
 
-| Parameter    | Meaning                                                                | Default   |
-|--------------|------------------------------------------------------------------------|-----------|
-| `K_register` | Target number of active or pending registrations per bucket            | `5`       |
-| `K_lookup`   | Maximum number of registrar queries per bucket during lookup           | `5`       |
-| `F_return`   | Maximum number of advertisements returned by one registrar             | `10`      |
-| `F_lookup`   | Target for the number of distinct advertisers to collect during lookup | `30`      |
-| `E`          | Advertisement expiry duration                                          | `15 min`  |
-| `C`          | Registrar ad cache capacity                                            | `1000`    |
-| `δ`          | Registration retry window duration                                     | **`TBD`** |
-| `Pocc`       | Occupancy exponent in the waiting-time function                        | `10`      |
-| `G`          | Safety constant in the waiting-time function                           | `10^-7`   |
+| Parameter          | Meaning                                                                       | Default        |
+|--------------------|-------------------------------------------------------------------------------|----------------|
+| `K_register`       | Target number of active or pending registrations per bucket                   | `5`            |
+| `F_return`         | Maximum number of advertisements returned for one topic query                 | `16`           |
+| `F_lookup`         | Caller/application-defined target number of distinct advertiser results       | Caller-defined |
+| `SearchBucketSize` | Maximum candidate capacity of one search bucket                               | `8`            |
+| `SearchYieldFloor` | Yield threshold for staying at the responding bucket instead of moving closer | `8`            |
+| `SearchAuxRadius`  | Neighbourhood around the active bucket for auxiliary registrar requests       | `1`            |
+| `E`                | Advertisement expiry duration                                                 | `15 min`       |
+| `C`                | Registrar ad cache capacity                                                   | `1000`         |
+| `δ`                | Registration retry window duration                                            | `5 sec`      |
+| `Pocc`             | Occupancy exponent in the waiting-time function                               | `10`           |
+| `G`                | Safety constant in the waiting-time function                                  | `10^-7`        |
+
 
 ## Implementation Considerations
 
@@ -923,7 +1025,6 @@ The exact encoding of TopDisc messages, ticket signatures, request identifiers, 
 returned advertisements, neighbour ENRs, and any application-specific advertisement payload is
 specified in the wire-format document.
 
-[RFC 5869]: https://www.rfc-editor.org/rfc/rfc5869
 [FINDNODE]: ./discv5-wire.md#findnode-request-0x03
 [REGTOPIC]: ./discv5-wire.md#regtopic-request-0x07
 [REGCONFIRMATION]: ./discv5-wire.md#regconfirmation-response-0x08
@@ -931,3 +1032,11 @@ specified in the wire-format document.
 [TOPICNODES]: ./discv5-wire.md#topicnodes-response-0x0a
 [NODES]: ./discv5-wire.md#nodes-response-0x04
 [ng ENR entry]: ../enr-entries/ng.md
+
+### References
+
+- [DISC-NG paper]
+- [RFC 5869]
+
+[DISC-NG paper]: https://doi.org/10.1109/EuroSP60621.2024.00019
+[RFC 5869]: https://www.rfc-editor.org/rfc/rfc5869
