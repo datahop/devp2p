@@ -713,7 +713,7 @@ only follows the waiting times it is given. The recommended function, as current
 (provisional, see [Parameters](#parameters)), is:
 
     base(c) = Wbase * E / (1 - c/C)^Pocc
-    w(ad)   = base(c) * c(ad.service) / (c + 1)  +  base(c) * score(ad.IP)
+    w(ad)   = base(c) * c(ad.service) / (c + 1)  +  base(c) * score(ad.IP)  +  base(c) * G
 
 where:
 
@@ -724,10 +724,18 @@ where:
 - `score(ad.IP)` is the IP similarity score computed from the advertiser's IP (ad.IP) in the
   advertised ENR;
 - `Pocc` is the occupancy exponent;
-- `Wbase` is the base waiting-time factor, `0.1`, so that `base(0) = E / 10`.
+- `Wbase` is the base waiting-time factor, `0.1`, so that `base(0) = E / 10`;
+- `G` is the safety constant, `10^-7`.
 
-The first term is the service component and the second the IP component. Each component is raised
-to its lower bound before the two are added (see [Waiting-Time Lower Bound](#waiting-time-lower-bound)).
+The first term is the service component, the second the IP component and the third the safety
+term. The service and IP components are each raised to their lower bound before the terms are
+added (see [Waiting-Time Lower Bound](#waiting-time-lower-bound)); the safety term has no lower
+bound. A term whose factor is `0` is `0`, also when `c = C` and `base(c)` is infinite.
+
+The safety term adds less than `W_min` while the cache is less than about 69 % full, so it has no
+effect at light load. It reaches `E` at about 84 % occupancy and `RegAttemptBudget` at about 85 %,
+so above that occupancy a registrar no longer admits an advertisement for a new service from a
+diverse address, and a full registrar quotes `maxWaitTime`.
 
 `base(c)` grows without bound as `c` approaches `C`. The registrar caps the resulting waiting time,
 and every recorded lower bound, at `maxWaitTime` before converting it to its local duration type.
@@ -736,9 +744,8 @@ capped quote still makes the advertiser abandon the attempt (see
 [Registration Procedure](#registration-procedure)).
 
 This differs from the form given in [DISC-NG paper], `E / (1 - c/C)^Pocc * (c(ad.service)/c +
-score(ad.IP) + G)`, in three ways: the occupancy factor is scaled by `Wbase`, the service term
-divides by `c + 1`, which also defines it for an empty cache, and there is no safety constant
-`G`. The reasons are given in the
+score(ad.IP) + G)`, in two ways: the occupancy factor is scaled by `Wbase`, and the service term
+divides by `c + 1`, which also defines it for an empty cache. The reasons are given in the
 [rationale](./discv5-rationale.md#why-change-the-waiting-time-function).
 
 The occupancy component increases the waiting time as the ad cache approaches capacity. This limits
@@ -1232,6 +1239,7 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `TicketKeyUses`       | Tickets sealed with one MAC key before a new key is made                      | `100,000`               | Local policy            | —                             |
 | `Wbase`               | Base waiting-time factor, `base(0) = Wbase * E`                               | `0.1` (provisional)     | Local policy            | [Waiting time][r-wait]        |
 | `Pocc`                | Occupancy exponent in the waiting-time function                               | `10`                    | Local policy            | [Waiting time][r-wait]        |
+| `G`                   | Safety constant of the waiting-time function, not lower-bounded               | `10^-7`                 | Local policy            | [Waiting time][r-wait]        |
 | `maxWaitTime`         | Cap on a computed waiting time and on recorded lower bounds                   | `24 h` (provisional)    | Local policy            | [Waiting time][r-wait]        |
 | `AuxENRLimit`         | Topic-distances served, and auxiliary ENRs accepted, per request              | `8`                     | Local policy            | [Aux ENRs][r-aux]             |
 | `F_return`            | Maximum number of advertisements returned for one topic query                 | `16`                    | SHOULD                  | [Security][r-security]        |
@@ -1259,8 +1267,7 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `SearchMixWait`       | Maximum wait before mixed results are released                                | `5 sec` (provisional)   | SHOULD                  | [Filter and mix][r-filter]    |
 
 Values marked *(provisional)* follow the current implementation and are pending the
-parameter decision in datahop/go-ethereum#12. The safety constant `G` of [DISC-NG paper] is not
-used; see [Waiting-Time Function](#waiting-time-function).
+parameter decision in datahop/go-ethereum#12.
 
 ## Implementation Considerations
 

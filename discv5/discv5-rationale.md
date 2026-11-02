@@ -852,14 +852,17 @@ The [waiting-time function] of the current implementation differs from the form 
 [DISC-NG], which multiplies `E / (1 - c/C)^Pocc` by `c(s)/c + score + G` for a small safety
 constant `G = 10^-7`.
 
-The safety constant is dropped. As a term multiplied by the occupancy factor, it added a
-waiting time well below one second while the cache was lightly loaded, which the `W_min`
-admission slack absorbs, so it had no effect there. Near full occupancy, the occupancy factor
-grows without bound, and `G` alone then quoted a long wait to an advertisement for a new
-service from a diverse address, even when the cache had space. The cost of dropping it is that
-an advertisement for a service with no cached advertisements, from an address with a score of
-`0`, is admitted without waiting; see
-[Admission Without a Safety Constant](#admission-without-a-safety-constant).
+The safety constant `G` is kept, as an additive term multiplied by the occupancy factor. It
+adds less than `W_min` while the cache is less than about 69 % full, so at light load the
+admission slack absorbs it. Near full occupancy it is the only cost charged to an advertisement
+for a new service from a diverse address: it reaches `E` at about 84 % occupancy and
+`RegAttemptBudget` at about 85 %. Above that, a registrar stops admitting such advertisements,
+which keeps its last places free and is the flow control [DISC-NG] intends; see
+[Admission Near Full Occupancy](#admission-near-full-occupancy). The safety term is not
+lower-bounded: it falls with occupancy, while the service and IP components keep their bounds.
+
+The original prototype used `max(c(s)/c + score, 10^-6)` instead of an additive `G`, which
+charged a new service from a diverse address almost nothing at any occupancy.
 
 The service term divides by `c + 1` instead of `c`, which defines it for an empty cache
 without a special case. The factor `Wbase = 0.1` scales the occupancy term, so that an empty
@@ -937,12 +940,16 @@ first node's waiting time. The waiting time was computed for the first node's ad
 operator can let a well-scored address collect tickets and use them for nodes whose addresses
 would have been charged more. Single use limits each ticket to one admission.
 
-### Admission Without a Safety Constant
+### Admission Near Full Occupancy
 
-Without `G`, an advertisement for a service with no cached advertisements from an address with
-a score of `0` waits for nothing, at any occupancy. Advertisements for many distinct services,
-from diverse addresses, can fill a registrar's cache up to `C` at the rate the attacker can send
-them. Honest advertisers then receive tickets for the time of the next expiry.
+Without `G`, an advertisement for a service with no cached advertisements, from an address with
+a score of `0`, would wait for nothing at any occupancy. Advertisements for many distinct
+services from diverse addresses could then fill a registrar's cache up to `C`. With `G`, such
+advertisements are quoted more than `RegAttemptBudget` above about 85 % occupancy, so an
+attacker fills at most about 85 % of the cache this way, and only with addresses diverse enough
+to keep their IP score at `0`: the IP similarity tree counts one entry per advertisement, so
+many advertisements from one prefix raise its score. An advertiser quoted over its budget moves
+to another registrar from its standby list.
 
 ### IPv6 Prefixes
 
