@@ -240,13 +240,13 @@ response data.
 
 ### REGTOPIC Request (0x07)
 
-    message-data    = [request-id, topic, ENR, ticket,
+    message-data    = [request-id, topic, ticket, ENR,
                        [topic-distance₁, topic-distance₂, ..., topic-distanceₙ]]
     message-type    = 0x07
     topic           = 32-byte service / topic identifier
-    ENR             = current node record of sender
     ticket          = opaque byte array containing a ticket previously issued by the
                       recipient registrar; empty (`0x80`) on first attempt
+    ENR             = current node record of sender
     topic-distanceₙ = positive integer log2 distance from `topic` where the sender's
                       service table `B(topic)` still has space
 
