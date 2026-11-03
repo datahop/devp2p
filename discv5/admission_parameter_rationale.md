@@ -1,5 +1,10 @@
 # Rationale for Admission-Control Parameter Choices
 
+Note: this report evaluates the waiting-time function of the [DISC-NG paper](https://doi.org/10.1109/EuroSP60621.2024.00019) given below, with
+`C = 1000`, no `Wbase` factor, and a service term of `c(ad.service)/c`. The current function
+uses `C = 5000`, `Wbase = 0.1`, and a service term of `c(ad.service)/(c + 1)`; see the
+[Waiting-Time Function](./discv5-theory.md#waiting-time-function) in the theory document.
+
 ## 1. Objective
 
 This report motivates the choice of parameter values for the registrar-side admission protocol used for topic advertisement registration. The admission protocol regulates access to a finite advertisement cache (ad cache). Its purpose is not merely to keep the cache below its capacity, but to decide *how to prioritise* registrations when admitting them to the cache by imposing *waiting times* to the registration requests. The waiting times determine the delay in which each request is to wait before its ad is stored in the ad cache. 

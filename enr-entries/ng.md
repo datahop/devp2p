@@ -1,24 +1,24 @@
-# The "topic-discovery" ENR entry
+# The "ng" ENR entry
 
-This specification defines the "topic-discovery" ENR entry, which signals that a node
+This specification defines the "ng" ENR entry, which signals that a node
 implements the [TopDisc] capability for discv5 and is willing to participate in topic
 service tables, registrations, and lookups.
 
 ## Entry Format
 
-    entry-key   = "topic-discovery"
+    entry-key   = "ng"
     entry-value = version
 
 Where `version` is an unsigned integer identifying the supported TopDisc protocol version.
 A node implementing the version described in the TopDisc document sets:
 
-    topic-discovery = 1
+    ng = 1
 
 ## Semantics
 
-A node MUST publish the `topic-discovery` entry in its ENR before it can be selected as a
+A node MUST publish the `ng` entry in its ENR before it can be selected as a
 registrar or as a target of topic-discovery queries by other nodes. Nodes whose ENR does
-not contain `topic-discovery`, or whose `topic-discovery` value is not understood by the
+not contain `ng`, or whose `ng` value is not understood by the
 local implementation, MUST NOT be inserted into local TopDisc service tables and MUST NOT
 be selected for topic registration or lookup requests.
 
@@ -36,7 +36,7 @@ policy.
 
 ### Initial version (2026)
 
-The initial version of the "topic-discovery" entry is proposed in this document, alongside
+The initial version of the "ng" entry is proposed in this document, alongside
 the TopDisc specification.
 
 [TopDisc]: ../discv5/discv5-theory.md#topic-based-service-discovery
