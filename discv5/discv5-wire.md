@@ -43,9 +43,7 @@ packets smaller than this size.
 
 Since low-latency communication is expected, implementations should place short timeouts
 on request/response interactions. Good timeout values are 500ms for a single
-request/response and 1s for the handshake. The current TopDisc implementation waits 700ms
-for each response packet: the timer restarts when a response packet for the request
-arrives, and the request times out when none arrives within that time.
+request/response and 1s for the handshake.
 
 When responding to a request, the response should be sent to the UDP envelope address of
 the request.
@@ -213,11 +211,10 @@ When handling NODES as a response to FINDNODE, the recipient should verify that 
 received nodes match the requested distances.
 
 When NODES appears as a response to REGTOPIC or TOPICQUERY, it carries auxiliary ENRs
-that the responder selects for the requested topic from the nodes it knows; the current
-implementation takes them from its ordinary node table (see the
+selected for the requested topic from the responder's ordinary node table (see the
 [theory section on auxiliary ENRs]). These ENRs are routing information for the requester to
-populate or refresh its own service table `B(s)`. They are not themselves topic registrants; the actual registered nodes are
-returned via TOPICNODES.
+populate or refresh its own service table `B(s)`. They are not themselves topic registrants;
+the actual registered nodes are returned via TOPICNODES.
 
 ### TALKREQ Request (0x05)
 
@@ -263,17 +260,13 @@ distance to `topic` matches one of the listed values, so the response helps the 
 populate its service table.
 
 The list is in priority order: a recipient that caps the number of auxiliary ENRs serves the
-earliest listed distances first. The current Go implementation does not decode a REGTOPIC
-whose list holds more than 256 entries, and so does not answer it.
+earliest listed distances first.
 
 A decoded REGTOPIC is always answered with a single REGCONFIRMATION response, including
 requests that the registrar rejects and requests carrying an invalid, expired or already used
 ticket. The recipient may additionally send zero or more NODES responses carrying auxiliary
 ENRs (see NODES). It sends no NODES responses when it rejects the request or answers a ticket
-presented before its window. The current implementation sends at most 3 ENRs per NODES
-response. Its advertiser caps the announced `total` at 8, but keeps waiting for the
-REGCONFIRMATION until it arrives or the request fails or times out, and keeps at most 8
-auxiliary ENRs.
+presented before its window.
 
 The registrar MUST reject the request if `ENR` is not a valid node record, if its node ID
 is not the sender's, if it holds no address of the packet's address family, if that address
@@ -311,8 +304,7 @@ plays three roles, distinguished by `ticket` and `wait-time`:
   tickets] and the [theory section on the waiting-time function].
 - If `ticket` is the empty byte array and `wait-time` is `0`, the registrar rejected the
   request. `total` is `1`. The advertiser MUST NOT treat the advertisement as admitted and
-  SHOULD NOT retry this registrar at once. The current implementation keeps the registrar,
-  by node ID, out of its advertise table for `E`. A rejection shows that the registrar is reachable;
+  SHOULD NOT retry this registrar at once. A rejection shows that the registrar is reachable;
   it is not a liveness failure.
 
 When the sender presents a ticket before its window, the registrar answers with the same
@@ -344,9 +336,7 @@ The `topic-distance` list serves the same purpose as in REGTOPIC: it tells the r
 which log2 distances from `topic` the sender's service table still has room for, so the
 recipient can choose useful auxiliary ENRs to include in its NODES responses. The list is in
 priority order: a recipient that caps the number of auxiliary ENRs serves the earliest listed
-distances first. A discoverer lists the distances from farthest to closest to `topic`. The
-current Go implementation does not decode a TOPICQUERY whose list holds more than 256 entries,
-and so does not answer it.
+distances first. A discoverer lists the distances from farthest to closest to `topic`.
 
 See the [theory section on lookup responses] for the registrar side, the [theory section on
 the lookup procedure] for how the discoverer uses the responses, and the [theory section on
@@ -366,10 +356,8 @@ TOPICNODES messages may be sent for a single TOPICQUERY.
 The `total` field announces the total number of responses (TOPICNODES messages plus any
 NODES messages carrying auxiliary ENRs) the recipient will send for this request.
 Implementations may place a limit on the allowed maximum for `total`; if exceeded,
-additional responses may be ignored. The current Go implementation does not decode a
-TOPICNODES message holding more than 16 ENRs. The current implementation sends at most 3 ENRs per TOPICNODES or NODES response.
-The discoverer waits for at most 16 responses, even if `total` is higher, and keeps at most
-16 advertisements and 16 auxiliary ENRs.
+additional responses may be ignored. Implementations may also limit list lengths and the
+number of ENRs per response; see the [theory section on parameters] for the defaults.
 
 The recipient MUST NOT return expired advertisements from its ad cache. When the
 ad cache contains more than `F_return` advertisements for the topic, the recipient

@@ -393,8 +393,8 @@ operations. Advertisers use `B(s)` as an advertise table for service `s`; discov
 a search table for service `s`.
 
 Whether a node that both advertises and searches for `s` keeps one table or two is an
-implementation choice. The current implementation keeps two: an advertise table kept for as long as
-`s` is advertised, and a search table filled afresh for each search pass. The topic-distance hints
+implementation choice. This document describes two: an advertise table kept for as long as `s` is
+advertised, and a search table filled afresh for each search pass. The topic-distance hints
 of a request come from the table of the operation that sends it: [REGTOPIC] lists the advertise
 buckets with space (see [Advertisement Placement](#advertisement-placement)), [TOPICQUERY] the
 search buckets around the active bucket (see
@@ -474,14 +474,15 @@ of a responder to fill a response with many ENRs from one bucket.
 
 If the registrar has no eligible ENR for a requested distance, it omits that auxiliary ENR.
 
-The requester lists the topic-distances in priority order, and a registrar that caps auxiliary
-ENRs serves the earliest listed distances first. The current implementation serves at most the
-first 8 listed distances, so it returns at most 8 auxiliary ENRs. It draws them from its ordinary
-node table, keeping TopDisc-capable nodes whose address may be relayed to the requester, as for
-[NODES] responses to [FINDNODE], and picks one at random per distance. Unlike [FINDNODE] responses,
-these ENRs are not restricted to nodes whose liveness the registrar has verified. An advertiser
-lists the distances of its advertise buckets from farthest to closest, and gives the closest
-bucket, which holds all distances `239` and below, as distance `239`.
+The requester lists the topic-distances in priority order, and a registrar that caps auxiliary ENRs
+serves the earliest listed distances first. By default a registrar serves at most the first
+`AuxENRLimit = 8` listed distances, so it returns at most 8 auxiliary ENRs (see
+[Parameters](#parameters)). It draws them from its ordinary node table, keeping TopDisc-capable
+nodes whose address may be relayed to the requester, as for [NODES] responses to [FINDNODE], and
+picks one at random per distance. Unlike [FINDNODE] responses, these ENRs are not restricted to
+nodes whose liveness the registrar has verified. An advertiser lists the distances of its advertise
+buckets from farthest to closest, and gives the closest bucket, which holds all distances `239` and
+below, as distance `239`.
 
 The same auxiliary-ENR selection rule applies to registration responses and lookup responses.
 
@@ -495,7 +496,7 @@ Implementations should therefore maintain TopDisc-level usability state for node
 
 If a node in `B(s)` fails to answer a registration or lookup request, times out, or returns a
 malformed response, implementations should temporarily exclude that node from selection for
-operations. The current implementation excludes it after the first failure (see
+operations. The advertiser and the discoverer exclude it after the first failure (see
 [Registration Procedure](#registration-procedure) and
 [Registrar Selection](#registrar-selection)). Temporary exclusion may be implemented by removing
 the node from `B(s)`, suppressing its selection for a backoff period, or assigning it lower
@@ -551,7 +552,7 @@ to a node that the registrar itself no longer considers alive. Advertisements of
 is not in the node table are kept until they expire.
 
 The registrar MUST NOT store duplicate active advertisements for the same advertiser and service.
-The current implementation answers a registration request for an advertisement already in the
+A registrar answers a registration request for an advertisement already in the
 cache as admitted, with `wait-time` equal to `E`, and leaves the stored advertisement and its
 expiry time unchanged. Re-registering before expiry therefore does not extend an advertisement.
 A ticket presented with such a request is still consumed if it would be credited (see
@@ -635,8 +636,8 @@ The ticket is opaque to the advertiser. The advertiser does not interpret the ti
 stores the latest ticket returned by the registrar and presents it in the next registration attempt
 to the same registrar. The ticket is registrar-local: only the registrar that issued it reads it,
 so its encoding and authentication mechanism are implementation choices and are not part of the
-wire format. The current implementation encodes a ticket as an HMAC-SHA256 tag of the ticket body
-followed by the body.
+wire format. For example, a registrar may encode a ticket as an HMAC-SHA256 tag of the ticket
+body followed by the body.
 
 Algorithmically, a ticket contains enough authenticated information for the registrar to verify:
 
@@ -697,8 +698,8 @@ A ticket is credited once while the registrar remembers it. A registrar remember
 credits, on time or late, nominally for `δ + ε` from the time of crediting, which covers the rest
 of the span in which the ticket could be credited. While it remembers a ticket, it treats any
 later presentation of that ticket as a new registration attempt, and still answers it. The memory
-is bounded: the current implementation remembers credited tickets by their MAC, up to 16,384
-entries, and drops the oldest entry when full, even before its `δ + ε` has passed. Replay
+is bounded: by default a registrar remembers up to `UsedTicketLimit = 16,384` credited tickets
+and drops the oldest entry when full, even before its `δ + ε` has passed. Replay
 protection therefore holds only while a ticket's entry is retained: a ticket whose entry was
 dropped early can be credited again if it is presented again within its window or late grace.
 
@@ -717,8 +718,8 @@ The waiting-time function determines how long an advertisement must wait before 
 The function depends on the current ad cache occupancy, the number of cached advertisements for the
 same service, and the IP similarity of the advertiser. The waiting time shapes the contents of the
 ad cache and provides flow control at the registrar. The function is registrar-local: an advertiser
-only follows the waiting times it is given. The recommended function, as currently implemented
-(provisional, see [Parameters](#parameters)), is:
+only follows the waiting times it is given. The recommended function (provisional, see
+[Parameters](#parameters)) is:
 
     base(c) = Wbase * E / (1 - c/C)^Pocc
     w(ad)   = base(c) * c(ad.service) / (c + 1)  +  base(c) * score(ad.IP)  +  base(c) * G
@@ -751,8 +752,8 @@ The recommended value is `maxWaitTime = 24 h` (provisional), far above any attem
 capped quote still makes the advertiser abandon the attempt (see
 [Registration Procedure](#registration-procedure)).
 
-The registrar computes `w(ad)` in seconds and rounds it up to its local duration unit, nanoseconds
-in the current implementation; a result that is not positive, or not a number, is `0`. It rounds
+The registrar computes `w(ad)` in seconds and rounds it up to its local duration unit, for example
+nanoseconds; a result that is not positive, or not a number, is `0`. It rounds
 `wait-time` up to the next millisecond on the wire. `c` and `c(ad.service)` count the stored
 advertisements, including expired ones not yet removed. The registrar reads its clock once per
 request and uses that value of `now` for the ticket credit, the waiting time and the admission.
@@ -835,9 +836,9 @@ trees. If an advertisement contains eligible addresses from both families,
 present, that family's score is used.
 
 Loopback, private, and link-local addresses are not scored: they contribute `0`. The
-IP similarity trees are updated as advertisements are admitted and removed. In the
-current implementation, the addresses of admitted advertisements are inserted whether
-or not they are scored, so such addresses still count towards `N`.
+IP similarity trees are updated as advertisements are admitted and removed. The addresses
+of admitted advertisements are inserted whether or not they are scored, so such addresses
+still count towards `N`.
 
 ### Waiting-Time Lower Bound
 
@@ -909,11 +910,10 @@ auxiliary ENRs. A candidate is not added to a bucket if:
 2. it is in the advertiser's failed set or overloaded set for `s` (see
    [Registration Procedure](#registration-procedure));
 3. the bucket already holds `RegStandbyLimit` standby candidates;
-4. another registrar in the bucket has an address in the same `/24` prefix. The current
-   implementation applies this limit to the node's endpoint address, the more global of its IPv4
-   and IPv6 addresses (IPv4 if both are equally global), with the same prefix length for both
-   families. LAN addresses are exempt. A registrar holds its prefix slot until it is removed from
-   the bucket; or
+4. another registrar in the bucket has an address in the same `/24` prefix. The limit applies to
+   the node's endpoint address, the more global of its IPv4 and IPv6 addresses (IPv4 if both are
+   equally global), with the same prefix length for both families. LAN addresses are exempt. A
+   registrar holds its prefix slot until it is removed from the bucket; or
 5. the candidate is an auxiliary ENR, and the registrar that returned it has already contributed a
    candidate to that bucket, in this or an earlier response.
 
@@ -929,8 +929,8 @@ The following rules are implementation guidance. They do not change what is sent
 registration request, but they decide whether ticket retries arrive within their window:
 
 - The advertiser SHOULD send registration requests through several concurrent senders, so that a
-  request to an unresponsive registrar does not hold back the others. The current implementation
-  uses four senders per service.
+  request to an unresponsive registrar does not hold back the others. The recommended value is
+  `RegSenders = 4` per service.
 - One bucket does not block another. When several buckets have a due attempt, the advertiser
   serves them in turn, one attempt per bucket, starting with the farthest bucket.
 - Within a bucket, a due ticket retry goes before a first contact; otherwise the attempt due first
@@ -971,8 +971,8 @@ The lifetime in an admission is capped at `E`.
 A registration attempt fails if the request times out, the registrar rejects the request, or it
 returns a malformed response. On failure, the advertiser removes
 the registrar from the bucket, fills the slot from the standby candidates, and adds the registrar to
-its **failed set** for `s`. A registrar in the failed set is not added to the advertise table
-again, from any source, for `E` from the time it was first added.
+its **failed set** for `s`, by node ID. A registrar in the failed set is not added to the
+advertise table again, from any source, for `E` from the time it was first added.
 
 Only a timeout counts as a liveness failure of the registrar towards the ordinary node table. A
 rejection is an answer: it shows that the registrar is reachable.
@@ -984,8 +984,8 @@ unless it is removed earlier by registrar policy. The advertiser takes the lifet
 Registration responses may include auxiliary ENRs. The advertiser may use these ENRs to update
 its advertise table `B(s)` after validating the ENRs, checking TopDisc capability, and applying
 local usability policy. The recommended auxiliary-ENR selection rule is described in
-[Auxiliary ENR Selection](#auxiliary-enr-selection). The current implementation accepts at most 8
-auxiliary ENRs per registration request.
+[Auxiliary ENR Selection](#auxiliary-enr-selection). The advertiser MAY cap the auxiliary ENRs it
+accepts per registration request; the default is `RegAuxAccept = 8`.
 
 ### Renewal
 
@@ -994,11 +994,10 @@ refresh the expiry of an advertisement it already holds (see [Ad Cache](#ad-cach
 advertisement cannot be extended by registering again before it expires.
 
 Renewal is therefore a new registration after expiry, not tied to the registrar that held the
-advertisement. In the current implementation, when an advertisement expires, the registrar leaves
-the bucket and the free slot goes to a standby candidate, which may be a different registrar. The
-previous registrar becomes a candidate again only when it is offered again, from the node table or
-as an auxiliary ENR. Until the new registration is admitted, the bucket holds one advertisement
-fewer than `K_register`.
+advertisement. When an advertisement expires, the registrar leaves the bucket and the free slot
+goes to a standby candidate, which may be a different registrar. The previous registrar becomes a
+candidate again only when it is offered again, from the node table or as an auxiliary ENR. Until
+the new registration is admitted, the bucket holds one advertisement fewer than `K_register`.
 
 Advertisers should treat registrations as soft state. The target is not to permanently bind a
 service to a fixed set of registrars, but to maintain sufficient active or pending placements across
@@ -1260,8 +1259,8 @@ spare, see [Lookup Procedure](#lookup-procedure));
 7. the destination search bucket has available capacity; and
 8. inserting the node does not violate the bucket's IP-prefix diversity restriction.
 
-As part of the IP-prefix diversity restriction, the current implementation allows at most two
-candidates from the same `/24` prefix in a search bucket; LAN addresses are exempt from this
+As part of the IP-prefix diversity restriction, a search bucket by default holds at most two
+candidates from the same `/24` prefix (`SearchBucketPrefix`); LAN addresses are exempt from this
 restriction. As in the advertise table, the limit applies to the node's endpoint address, IPv4 or
 IPv6, with the same prefix length for both families. The search table is filled
 afresh for each pass, so the restriction holds within one pass. A registrar that answered keeps
@@ -1269,10 +1268,10 @@ its prefix slot for the rest of the pass, so another node from the same `/24` ca
 place; a registrar whose query failed releases its slot. In the advertise table, a registrar
 holds its prefix slot until it is removed from the bucket.
 
-The current implementation accepts at most 16 auxiliary ENRs per lookup request. When processing
-auxiliary ENRs from a single response, at most one candidate is admitted into any given search
-bucket. This limits the contribution of a single responding registrar to that
-bucket within one response.
+A discoverer MAY cap the auxiliary ENRs it accepts per lookup request; the default is
+`QueryAuxAccept = 16`. When processing auxiliary ENRs from a single response, at most one candidate
+is admitted into any given search bucket. This limits the contribution of a single responding
+registrar to that bucket within one response.
 
 A successful ordinary Discovery v5 liveness check is not required before insertion. If the node
 subsequently fails to respond to a TopDisc request, it may be removed or temporarily excluded
@@ -1306,8 +1305,8 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `RegAuxAccept`        | Auxiliary ENRs accepted per REGTOPIC request                                  | `8`                     | Local policy            | [Aux ENRs][r-aux]             |
 | `QueryAuxAccept`      | Auxiliary ENRs accepted per TOPICQUERY request                                | `16`                    | Local policy            | [Aux ENRs][r-aux]             |
 | `ENRsPerPacket`       | ENRs per NODES or TOPICNODES packet answering REGTOPIC or TOPICQUERY          | `3`                     | Local policy            |                               |
-| `MaxTopicDistances`   | Topic-distances in a REGTOPIC or TOPICQUERY above which Go does not decode it | `256`                   | Local policy            |                               |
-| `MaxTopicNodes`       | ENRs in one TOPICNODES above which Go does not decode it                      | `16`                    | Local policy            |                               |
+| `MaxTopicDistances`   | Longest topic-distance list decoded in a REGTOPIC or TOPICQUERY               | `256`                   | Local policy            |                               |
+| `MaxTopicNodes`       | Most ENRs decoded in one TOPICNODES                                           | `16`                    | Local policy            |                               |
 | `RegRespLimit`        | Cap on the announced `total` of a REGTOPIC; REGCONFIRMATION is still awaited  | `8`                     | Local policy            |                               |
 | `QueryRespLimit`      | Responses to one TOPICQUERY that the discoverer waits for                     | `16`                    | Local policy            |                               |
 | `RespTimeout`         | Time to wait for each response packet before a request times out              | `700 ms`                | Local policy            |                               |
@@ -1338,8 +1337,7 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `SearchMixRegistrars` | Release threshold: registrars that replied with results, checked per query    | `5` (provisional)       | SHOULD                  | [Filter and mix][r-filter]    |
 | `SearchMixWait`       | Release threshold: wait of the first queued result, checked per query         | `5 sec` (provisional)   | SHOULD                  | [Filter and mix][r-filter]    |
 
-Values marked *(provisional)* follow the current implementation and are pending the
-parameter decision in datahop/go-ethereum#12.
+Values marked *(provisional)* are pending the parameter decision in datahop/go-ethereum#12.
 
 ## Implementation Considerations
 
@@ -1362,7 +1360,21 @@ indicated by the registrar before retrying.
 TopDisc responses may be split across multiple packets when supported by the wire protocol.
 
 Implementations should collect all response packets belonging to the same request until the
-announced response count is reached or the request times out.
+announced response count is reached or the request times out. By default, a requester waits
+`RespTimeout = 700 ms` for each response packet: the timer restarts when a response packet for
+the request arrives, and the request times out when none arrives within that time.
+
+A requester MAY cap the number of responses it waits for. By default, an advertiser caps the
+announced `total` of a [REGTOPIC] at `RegRespLimit = 8` but keeps waiting for the [REGCONFIRMATION]
+until it arrives or the request fails or times out, and a discoverer waits for at most
+`QueryRespLimit = 16` responses to a [TOPICQUERY], even if `total` is higher, and keeps at most
+`F_return` advertisements and `QueryAuxAccept` auxiliary ENRs from them. A responder by default
+sends at most `ENRsPerPacket = 3` ENRs per [NODES] or [TOPICNODES] response.
+
+Implementations may limit the length of the lists they decode. By default, a node does not decode
+a [REGTOPIC] or [TOPICQUERY] whose topic-distance list holds more than `MaxTopicDistances = 256`
+entries, and so does not answer it, nor a [TOPICNODES] holding more than `MaxTopicNodes = 16` ENRs.
+See [Parameters](#parameters).
 
 ### Wire Encoding
 

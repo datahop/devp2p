@@ -852,9 +852,8 @@ increases.
 
 ## Why Change the Waiting-Time Function?
 
-The [waiting-time function] of the current implementation differs from the form in
-[DISC-NG], which multiplies `E / (1 - c/C)^Pocc` by `c(s)/c + score + G` for a small safety
-constant `G = 10^-7`.
+The [waiting-time function] differs from the form in [DISC-NG], which multiplies
+`E / (1 - c/C)^Pocc` by `c(s)/c + score + G` for a small safety constant `G = 10^-7`.
 
 The safety constant `G` is kept, as an additive term multiplied by the occupancy factor. It
 adds less than `W_min` while the cache is less than about 69 % full, so at light load the
@@ -865,8 +864,8 @@ which keeps its last places free and is the flow control [DISC-NG] intends; see
 [Admission Near Full Occupancy](#admission-near-full-occupancy). The safety term is not
 lower-bounded: it falls with occupancy, while the service and IP components keep their bounds.
 
-The original prototype used `max(c(s)/c + score, 10^-6)` instead of an additive `G`, which
-charged a new service from a diverse address almost nothing at any occupancy.
+Using `max(c(s)/c + score, 10^-6)` instead of an additive `G` would charge a new service from
+a diverse address almost nothing at any occupancy.
 
 The service term divides by `c + 1` instead of `c`, which defines it for an empty cache
 without a special case. The factor `Wbase = 0.1` scales the occupancy term, so that an empty
@@ -875,8 +874,8 @@ pending the parameter decision in datahop/go-ethereum#12.
 
 The occupancy factor makes the waiting time grow very fast as the cache fills: about
 `3 * 10^10` seconds at 86 % occupancy. Converted to a 64-bit nanosecond duration, such a value
-is out of range. In Go the result of that conversion depends on the platform, and on amd64 it
-became negative, so that a cache about 86 % full or more admitted every request
+is out of range, and an overflowing conversion can turn a long wait into an immediate
+admission: a cache about 86 % full or more would then admit every request
 (datahop/go-ethereum#154). The waiting time is therefore capped at `maxWaitTime` before the
 conversion. The cap is far above `RegAttemptBudget`, so a capped quote still makes the
 advertiser move to another registrar, on every platform. For the same reason, advertisers
@@ -937,17 +936,19 @@ handle TopDisc messages.
 
 ## TopDisc Security Considerations
 
-The following issues are open in the current specification and implementation.
+The following security considerations apply to TopDisc.
 
 ### Ticket Transfer
 
 The [ticket mechanism] binds a ticket to the topic and the advertiser's node ID
 (datahop/go-ethereum#160). A ticket handed to another node is not credited, so tickets cannot
-be moved between identities. A ticket is not bound to the advertised ENR: a node that changes
-its record during an attempt, under the same node ID, keeps its ticket. The waiting time was
-computed for the address in the earlier record, so an operator that moves a node's key to
-another address keeps the credit earned at the first address. Single use limits each ticket
-to one admission while the registrar remembers it (see [tickets]).
+be moved between identities, and a ticket issued for one topic cannot be used for another. A
+ticket is not bound to the advertised ENR: a node that changes its record during an attempt,
+under the same node ID, keeps its ticket and the waiting time it has credited. The required
+waiting time is recomputed at admission from the presented record, so a record with a worse
+address must still wait as long as that address requires; only the elapsed waiting carries
+over. Single use limits each ticket to one admission while the registrar remembers it (see
+[tickets]).
 
 ### Admission Near Full Occupancy
 
