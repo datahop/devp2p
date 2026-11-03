@@ -211,10 +211,10 @@ When handling NODES as a response to FINDNODE, the recipient should verify that 
 received nodes match the requested distances.
 
 When NODES appears as a response to REGTOPIC or TOPICQUERY, it carries auxiliary ENRs
-selected from the responder's view of the service table for the requested topic. These
-ENRs are routing information for the requester to populate or refresh its own service
-table `B(s)`. They are not themselves topic registrants; the actual registered nodes are
-returned via TOPICNODES.
+selected for the requested topic from the responder's ordinary node table (see the
+[theory section on auxiliary ENRs]). These ENRs are routing information for the requester to
+populate or refresh its own service table `B(s)`. They are not themselves topic registrants;
+the actual registered nodes are returned via TOPICNODES.
 
 ### TALKREQ Request (0x05)
 
@@ -262,11 +262,11 @@ populate its service table.
 The list is in priority order: a recipient that caps the number of auxiliary ENRs serves the
 earliest listed distances first.
 
-REGTOPIC is always answered with a single REGCONFIRMATION response, including requests that
-the registrar rejects and requests carrying an invalid, expired or already used ticket. The
-recipient may additionally send zero or more NODES responses carrying auxiliary ENRs
-selected from its view of the service table. It sends no NODES responses when it rejects
-the request or answers a ticket presented before its window.
+A decoded REGTOPIC is always answered with a single REGCONFIRMATION response, including
+requests that the registrar rejects and requests carrying an invalid, expired or already used
+ticket. The recipient may additionally send zero or more NODES responses carrying auxiliary
+ENRs (see NODES). It sends no NODES responses when it rejects the request or answers a ticket
+presented before its window.
 
 The registrar MUST reject the request if `ENR` is not a valid node record, if its node ID
 is not the sender's, if it holds no address of the packet's address family, if that address
@@ -304,8 +304,8 @@ plays three roles, distinguished by `ticket` and `wait-time`:
   tickets] and the [theory section on the waiting-time function].
 - If `ticket` is the empty byte array and `wait-time` is `0`, the registrar rejected the
   request. `total` is `1`. The advertiser MUST NOT treat the advertisement as admitted and
-  SHOULD NOT retry this registrar with the same record. A rejection shows that the registrar
-  is reachable; it is not a liveness failure.
+  SHOULD NOT retry this registrar at once. A rejection shows that the registrar is reachable;
+  it is not a liveness failure.
 
 When the sender presents a ticket before its window, the registrar answers with the same
 `ticket` bytes it received and the remaining wait in `wait-time`, and sends no NODES
@@ -329,7 +329,8 @@ NODES messages carrying auxiliary ENRs) that the registrar will send for this re
 TOPICQUERY asks the recipient to return registered advertisers for the given `topic` from
 its ad cache. The recipient sends zero or more TOPICNODES responses containing matching
 advertiser ENRs, and may additionally send zero or more NODES responses carrying
-auxiliary ENRs selected from its service-table view (see NODES).
+auxiliary ENRs (see NODES). A recipient with neither advertisements nor auxiliary ENRs to
+return sends a single empty TOPICNODES response with `total` set to `1`.
 
 The `topic-distance` list serves the same purpose as in REGTOPIC: it tells the recipient
 which log2 distances from `topic` the sender's service table still has room for, so the
@@ -355,7 +356,8 @@ TOPICNODES messages may be sent for a single TOPICQUERY.
 The `total` field announces the total number of responses (TOPICNODES messages plus any
 NODES messages carrying auxiliary ENRs) the recipient will send for this request.
 Implementations may place a limit on the allowed maximum for `total`; if exceeded,
-additional responses may be ignored.
+additional responses may be ignored. Implementations may also limit list lengths and the
+number of ENRs per response; see the [theory section on parameters] for the defaults.
 
 The recipient MUST NOT return expired advertisements from its ad cache. When the
 ad cache contains more than `F_return` advertisements for the topic, the recipient
@@ -377,5 +379,6 @@ A collection of test vectors for this specification can be found at
 [theory section on lookup responses]: ./discv5-theory.md#lookup-responses
 [theory section on the lookup procedure]: ./discv5-theory.md#lookup-procedure
 [theory section on parameters]: ./discv5-theory.md#parameters
+[theory section on auxiliary ENRs]: ./discv5-theory.md#auxiliary-enr-selection
 [EIP-778]: ../enr.md
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md

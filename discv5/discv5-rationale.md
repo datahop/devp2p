@@ -470,8 +470,10 @@ selection provide opportunities for source diversity; lookup does not enforce a 
 number of distinct responding registrars. The [lookup response] limits how much one registrar can return, while
 [advertisement placement] distributes advertisements across multiple registrars. The
 lookup result target counts distinct advertisers and does not itself guarantee diversity
-of registrar sources. The lookup [mixes results](#why-filter-and-mix-lookup-results)
-across responding registrars, so that no single registrar decides a caller's first results.
+of registrar sources. The lookup [mixes results](#why-filter-and-mix-lookup-results): it
+interleaves queued results from available registrars where possible. Mixing is not a
+minimum-source guarantee: one registrar may supply all the usable results, and every queued
+result is released when the pass ends.
 
 ### Service-Table Poisoning
 
@@ -479,8 +481,7 @@ A malicious registrar may return misleading auxiliary ENRs in TopDisc responses 
 to pollute the requester's service table.
 
 Implementations mitigate this by validating returned ENRs, requiring a supported TopDisc
-capability before inserting nodes into service tables, applying ordinary Node Discovery v5
-liveness checks, and temporarily excluding nodes that repeatedly fail TopDisc operations (see [service-table update rules]).
+capability before inserting nodes into service tables, and temporarily excluding nodes that fail TopDisc operations (see [service-table update rules]).
 Auxiliary ENRs are routing information, not lookup results, and should not be treated as
 proof that a node participates in the requested topic.
 
@@ -640,7 +641,7 @@ updating its record.
 Without mixing, a pass would deliver the first registrar's whole response before any other
 registrar's results. A caller that stops after its first few results would then depend on a
 single registrar, which a malicious registrar could fill with sybil advertisements. Mixing
-holds results until several registrars have answered, or until a short wait has passed, and
+holds results until several registrars have answered, a short wait has passed, or the pass ends, and
 then delivers them one registrar at a time. In simulation (datahop/go-ethereum#140), mixing
 cut the share of searches whose first results were all sybils from 21 % to 0.15 %. Mixing
 does not remove the eclipse risk of a large `F_return`; see
@@ -687,9 +688,10 @@ The cache bounds registrar storage and makes advertisements soft state. Advertis
 renew or replace advertisements over time, which allows the system to adapt to churn,
 failures, and changes in service participation.
 
-The cache is a hard limit. A full cache returns a ticket for the time of its next expiry
-rather than evicting an admitted advertisement, so that a new advertiser cannot push out an
-honest one by asking.
+The cache is a hard limit. A full cache does not evict an admitted advertisement, so that a
+new advertiser cannot push out an honest one by asking. It quotes `maxWaitTime` minus the
+credited waiting time, and returns a ticket for the time of its next expiry only once the
+credited waiting time is within `W_min` of `maxWaitTime`.
 
 A registrar also drops the advertisements of an advertiser that its ordinary node table has
 dropped for failing liveness checks. The registrar has then seen the advertiser fail, and
@@ -741,9 +743,9 @@ This design prevents pending registrations from consuming unbounded registrar me
 an advertiser never returns, the registrar does not need to clean up per-request state for
 that advertiser.
 
-Tickets are bound to the advertisement being registered. This prevents a ticket issued for
-one topic or advertised ENR from being reused to register a different advertisement. The
-current implementation binds only the topic; see [Ticket Transfer](#ticket-transfer).
+Tickets are bound to the topic and the advertiser's node ID. This prevents a ticket issued for
+one topic or node from being reused for another topic or by another node. A ticket is not bound
+to the advertised ENR; see [Ticket Transfer](#ticket-transfer).
 
 ## Why Answer Every Registration Request?
 
@@ -758,7 +760,8 @@ topic's providers, against 72.3 % with plain discv5. The REGTOPIC traces of that
 (datahop/go-ethereum#152) show that 96 % of the ticket retries arrived after the 5 s window and
 were dropped without an answer; these made up 76 % of all REGTOPIC timeouts. The [tickets]
 rules therefore answer every request: a rejection with an explicit empty response, an early
-ticket with the remaining wait, a late, expired or invalid ticket as a new attempt.
+ticket with the remaining wait, a late ticket within the grace `ε` with the wait it was
+scheduled to have, and an expired or invalid ticket as a new attempt.
 
 The retries that did arrive inside the window were late, relative to its start, by 50 ms at the
 median and 3.8 s at the 99th percentile. The late grace `ε` credits a retry that misses the
@@ -766,7 +769,7 @@ window by a few seconds with the wait it was scheduled to have, instead of resta
 wait. `ε` is short against `E`, so a ticket cannot be redeemed long after it was earned, and
 the ticket issued in reply is re-based so that the lateness is not credited later either.
 
-A ticket is credited once. Without that rule, an advertiser whose advertisement was removed,
+A ticket is credited once while the registrar remembers it. Without that rule, an advertiser whose advertisement was removed,
 for example after the registrar's node table dropped it, could present the ticket that
 admitted it again and obtain a new advertisement with a full lifetime without waiting. An early
 ticket is returned unchanged rather than re-issued: a re-issued ticket would be a second valid
@@ -799,7 +802,8 @@ The attempt budget `RegAttemptBudget` bounds how long an advertiser keeps waitin
 registrar. After `E`, every advertisement in the registrar's cache has expired and been
 replaced, so a registrar that still has not admitted the advertisement is overloaded or
 malfunctioning, and the advertiser does better with another one. The budget is not a failure:
-the registrar answered, and it may be tried again later.
+the registrar answered, so it goes to a separate overloaded set rather than the failed set,
+and it may be tried again once it leaves that set after `E`.
 
 The failed set keeps a registrar that timed out, rejected the request or sent a malformed
 response out of the advertise table for an advertisement lifetime, from every source, so that auxiliary
@@ -848,9 +852,8 @@ increases.
 
 ## Why Change the Waiting-Time Function?
 
-The [waiting-time function] of the current implementation differs from the form in
-[DISC-NG], which multiplies `E / (1 - c/C)^Pocc` by `c(s)/c + score + G` for a small safety
-constant `G = 10^-7`.
+The [waiting-time function] differs from the form in [DISC-NG], which multiplies
+`E / (1 - c/C)^Pocc` by `c(s)/c + score + G` for a small safety constant `G = 10^-7`.
 
 The safety constant `G` is kept, as an additive term multiplied by the occupancy factor. It
 adds less than `W_min` while the cache is less than about 69 % full, so at light load the
@@ -861,8 +864,8 @@ which keeps its last places free and is the flow control [DISC-NG] intends; see
 [Admission Near Full Occupancy](#admission-near-full-occupancy). The safety term is not
 lower-bounded: it falls with occupancy, while the service and IP components keep their bounds.
 
-The original prototype used `max(c(s)/c + score, 10^-6)` instead of an additive `G`, which
-charged a new service from a diverse address almost nothing at any occupancy.
+Using `max(c(s)/c + score, 10^-6)` instead of an additive `G` would charge a new service from
+a diverse address almost nothing at any occupancy.
 
 The service term divides by `c + 1` instead of `c`, which defines it for an empty cache
 without a special case. The factor `Wbase = 0.1` scales the occupancy term, so that an empty
@@ -871,8 +874,8 @@ pending the parameter decision in datahop/go-ethereum#12.
 
 The occupancy factor makes the waiting time grow very fast as the cache fills: about
 `3 * 10^10` seconds at 86 % occupancy. Converted to a 64-bit nanosecond duration, such a value
-is out of range. In Go the result of that conversion depends on the platform, and on amd64 it
-became negative, so that a cache about 86 % full or more admitted every request
+is out of range, and an overflowing conversion can turn a long wait into an immediate
+admission: a cache about 86 % full or more would then admit every request
 (datahop/go-ethereum#154). The waiting time is therefore capped at `maxWaitTime` before the
 conversion. The cap is far above `RegAttemptBudget`, so a capped quote still makes the
 advertiser move to another registrar, on every platform. For the same reason, advertisers
@@ -884,12 +887,15 @@ If waiting times could decrease freely as the ad cache changes, advertisers woul
 incentivised to repeatedly request new tickets in the hope of obtaining a shorter wait.
 This would create unnecessary traffic and processing load.
 
-The [waiting-time lower bound] ensures that a new waiting time cannot improve on a
-previous waiting time by more than the elapsed time. It removes the incentive to repeatedly request
-new tickets while keeping registrar state bounded.
+The [waiting-time lower bound] limits how fast the service and IP components of a new waiting
+time can fall: while a bound is retained, a component charged later is at least the recorded
+value minus the elapsed time. Bounds are capped at `maxWaitTime`, a service bound is dropped with
+the service's last advertisement, IP bounds disappear with their branch of the IP similarity
+tree, and the safety term is not bounded, so the limit does not hold beyond them. It reduces the
+incentive to repeatedly request new tickets while keeping registrar state bounded.
 
-The lower-bound state is maintained only for bounded structures, such as topics already
-present in the ad cache and prefixes represented in the IP similarity tree.
+The lower-bound state is maintained only for bounded structures, such as topics that have
+advertisements in the ad cache and prefixes represented in the IP similarity tree.
 
 ## Why Return Auxiliary ENRs?
 
@@ -929,16 +935,19 @@ handle TopDisc messages.
 
 ## TopDisc Security Considerations
 
-The following issues are open in the current specification and implementation.
+The following security considerations apply to TopDisc.
 
 ### Ticket Transfer
 
-The [ticket mechanism] requires a ticket to be bound to its advertisement, but the current
-implementation binds it to the topic only (datahop/go-ethereum#68). A node that has waited for
-a ticket can hand it to another node, which presents it for its own ENR and is credited the
-first node's waiting time. The waiting time was computed for the first node's address, so an
-operator can let a well-scored address collect tickets and use them for nodes whose addresses
-would have been charged more. Single use limits each ticket to one admission.
+The [ticket mechanism] binds a ticket to the topic and the advertiser's node ID
+(datahop/go-ethereum#160). A ticket handed to another node is not credited, so tickets cannot
+be moved between identities, and a ticket issued for one topic cannot be used for another. A
+ticket is not bound to the advertised ENR: a node that changes its record during an attempt,
+under the same node ID, keeps its ticket and the waiting time it has credited. The required
+waiting time is recomputed at admission from the presented record, so a record with a worse
+address must still wait as long as that address requires; only the elapsed waiting carries
+over. Single use limits each ticket to one admission while the registrar remembers it (see
+[tickets]).
 
 ### Admission Near Full Occupancy
 
