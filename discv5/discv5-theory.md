@@ -416,8 +416,8 @@ node table. When constructing this initial service table, implementations should
 3. discard nodes currently excluded by local TopDisc usability policy;
 4. insert each remaining node into the corresponding bucket of `B(s)`.
 
-The current implementation does not require verified liveness: it takes every node of the
-ordinary node table whose ENR carries a supported `ng` version.
+Nodes are taken from the ordinary node table without a liveness check. A node that does not
+answer a TopDisc request is excluded for `E` through the failed sets of the operation.
 
 The resulting `B(s)` is soft state. It need not be complete before operations begin. If the
 ordinary node table contains too few nodes that can be used for operations, implementations
