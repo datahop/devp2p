@@ -889,14 +889,13 @@ This would create unnecessary traffic and processing load.
 
 The [waiting-time lower bound] limits how fast the service and IP components of a new waiting
 time can fall: while a bound is retained, a component charged later is at least the recorded
-value minus the elapsed time. Bounds are capped at `maxWaitTime`, IP bounds disappear with their
-branch of the IP similarity tree, and the safety term is not bounded, so the limit does not hold
-beyond them. It reduces the incentive to repeatedly request new tickets while keeping registrar
-state bounded.
+value minus the elapsed time. Bounds are capped at `maxWaitTime`, a service bound is dropped with
+the service's last advertisement, IP bounds disappear with their branch of the IP similarity
+tree, and the safety term is not bounded, so the limit does not hold beyond them. It reduces the
+incentive to repeatedly request new tickets while keeping registrar state bounded.
 
-The lower-bound state is maintained only for bounded structures, such as topics that had
-advertisements in the ad cache when the bound was recorded, kept until the bound decays, and
-prefixes represented in the IP similarity tree.
+The lower-bound state is maintained only for bounded structures, such as topics that have
+advertisements in the ad cache and prefixes represented in the IP similarity tree.
 
 ## Why Return Auxiliary ENRs?
 

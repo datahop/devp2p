@@ -869,11 +869,9 @@ early ticket returned unchanged, and admissions do not change the bounds.
 
 For a service `s` already in the ad cache, the registrar keeps one bound for the service
 component. When a later request for `s` arrives, the charged service component is the larger of
-the computed component and the bound's remaining value. The bound is kept until its remaining
-value reaches `0`, also after the last advertisement for `s` has left the cache. A bound
-recorded at `maxWaitTime` therefore keeps the quote for a new, unregistered attempt for `s` with
-no credited waiting time above `RegAttemptBudget` for about `maxWaitTime - RegAttemptBudget`,
-whether or not `s` still has advertisements in the cache.
+the computed component and the bound's remaining value. The bound is dropped when the last
+advertisement for `s` leaves the cache, so a request for a service with no advertisements in the
+cache is charged only the computed component.
 
 For IP addresses, lower-bound state is maintained at the IP-tree vertex corresponding to the longest
 prefix match already present in the tree, without introducing new vertices only for pending
