@@ -1195,7 +1195,7 @@ first replied. A round with results from a single registrar is held until those 
 waited `SearchMixWait`, checked in the same way. A node queued by several registrars is
 delivered once, with the ENR that has the highest sequence number. When the pass ends, every
 queued result is released in the same rounds, including results from a single registrar that
-have not waited `SearchMixWait`. The recommended values are `SearchMixRegistrars = 5` and
+have not waited `SearchMixWait`. The recommended values are `SearchMixRegistrars = 10` and
 `SearchMixWait = 5 sec` (provisional, see [Parameters](#parameters)).
 
 The discoverer SHOULD NOT send a new query while `SearchUnreadLimit` or more results wait
@@ -1332,7 +1332,7 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `SearchPassBackoff`   | Maximum spacing between search passes after idle passes                       | `60 sec` (provisional)  | SHOULD                  | [Passes][r-passes]            |
 | `SearchUnreadLimit`   | Unread results at which the discoverer stops sending queries                  | `16` (provisional)      | SHOULD                  | [Passes][r-passes]            |
 | `SearchFilterSize`    | Maximum number of entries in the lookup result filter                         | `50,000` (provisional)  | SHOULD                  | [Filter and mix][r-filter]    |
-| `SearchMixRegistrars` | Release threshold: registrars that replied with results, checked per query    | `5` (provisional)       | SHOULD                  | [Filter and mix][r-filter]    |
+| `SearchMixRegistrars` | Release threshold: registrars that replied with results, checked per query    | `10` (provisional)      | SHOULD                  | [Filter and mix][r-filter]    |
 | `SearchMixWait`       | Release threshold: wait of the first queued result, checked per query         | `5 sec` (provisional)   | SHOULD                  | [Filter and mix][r-filter]    |
 
 Values marked *(provisional)* are pending the parameter decision in datahop/go-ethereum#12.
