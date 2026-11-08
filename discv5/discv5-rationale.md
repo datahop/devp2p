@@ -649,9 +649,9 @@ does not remove the eclipse risk of a large `F_return`; see
 
 `SearchMixRegistrars` is 10. In one simulation run of 50,000 nodes, with 20 % sybil nodes on
 100 /24 networks and all IP limits applied, the share of searches that received only sybils in
-their first 16 results fell from 0.27 % with 5 registrars to 0.03 % with 10. Recall and the
+their first 16 results fell from 0.27 % with 5 registrars to 0.02 % with 10. Recall and the
 sybil share of all results remained approximately unchanged. The mean sybil share of the first
-16 results rose from 38.4 % to 40.7 %. The median first result on this run's single large topic
+16 results rose from 38.5 % to 41.3 %. The median first result on this run's single large topic
 arrives later, at 0.60 s rather than 0.30 s in the simulation's latency model. A search that
 finds fewer registrars with results waits for `SearchMixWait` or the end of the pass.
 
