@@ -1059,6 +1059,23 @@ advertisement for a whole lifetime, while a place in a search bucket costs one q
 [eclipse results](#why-filter-and-mix-lookup-results) for `SearchMixRegistrars` were measured with
 both limits in force.
 
+### Protocol Limits
+
+`ENRsPerPacket` is 3 because it is the most that always fits. A packet holds at most 1,280 bytes
+and an ENR up to 300. Four ENRs take 1,200 bytes, which leaves 80 for a header and
+authentication tag of at least 87 bytes.
+
+`RegRespLimit` is 8 and `QueryRespLimit` is 16, so that a responder sending one ENR per packet
+still delivers `RegAuxAccept` auxiliary ENRs or `F_return` advertisements. The caps keep a responder from holding a request open by announcing a large
+`total`. Since the timer restarts on each packet, they bound a request to about 5.6 s and 11.2 s.
+`MaxTopicDistances` is 256 because a request has one entry per log-distance. `MaxTopicNodes` is
+16, the per-response limit of the discv5 NODES message.
+
+`RespTimeout` is 700 ms, the timeout of the Go implementation's other discv5 requests. A timeout counts
+against the node, so a shorter value would penalise slow but working registrars. No measurement
+supports this value for TopDisc. `MinUDPPort` is 1024: discovery nodes do not use privileged ports,
+and dropping such records keeps a response from directing a node's packets at system services.
+
 ## TopDisc Security Considerations
 
 The following security considerations apply to TopDisc.

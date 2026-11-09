@@ -1302,13 +1302,13 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `AuxENRLimit`         | Topic-distances served per request, so auxiliary ENRs returned per request    | `8`                     | Local policy            | [Aux ENRs][r-aux]             |
 | `RegAuxAccept`        | Auxiliary ENRs accepted per REGTOPIC request                                  | `8`                     | Local policy            | [Aux ENRs][r-aux]             |
 | `QueryAuxAccept`      | Auxiliary ENRs accepted per TOPICQUERY request                                | `16`                    | Local policy            | [Aux ENRs][r-aux]             |
-| `ENRsPerPacket`       | ENRs per NODES or TOPICNODES packet answering REGTOPIC or TOPICQUERY          | `3`                     | Local policy            |                               |
-| `MaxTopicDistances`   | Longest topic-distance list decoded in a REGTOPIC or TOPICQUERY               | `256`                   | Local policy            |                               |
-| `MaxTopicNodes`       | Most ENRs decoded in one TOPICNODES                                           | `16`                    | Local policy            |                               |
-| `RegRespLimit`        | Cap on the announced `total` of a REGTOPIC; REGCONFIRMATION is still awaited  | `8`                     | Local policy            |                               |
-| `QueryRespLimit`      | Responses to one TOPICQUERY that the discoverer waits for                     | `16`                    | Local policy            |                               |
-| `RespTimeout`         | Time to wait for each response packet before a request times out              | `700 ms`                | Local policy            |                               |
-| `MinUDPPort`          | Returned ENRs must advertise a UDP port above this value                      | `1024`                  | Local policy            |                               |
+| `ENRsPerPacket`       | ENRs per NODES or TOPICNODES packet answering REGTOPIC or TOPICQUERY          | `3`                     | Local policy            | [Values][r-values]            |
+| `MaxTopicDistances`   | Longest topic-distance list decoded in a REGTOPIC or TOPICQUERY               | `256`                   | Local policy            | [Values][r-values]            |
+| `MaxTopicNodes`       | Most ENRs decoded in one TOPICNODES                                           | `16`                    | Local policy            | [Values][r-values]            |
+| `RegRespLimit`        | Cap on the announced `total` of a REGTOPIC; REGCONFIRMATION is still awaited  | `8`                     | Local policy            | [Values][r-values]            |
+| `QueryRespLimit`      | Responses to one TOPICQUERY that the discoverer waits for                     | `16`                    | Local policy            | [Values][r-values]            |
+| `RespTimeout`         | Time to wait for each response packet before a request times out              | `700 ms`                | Local policy            | [Values][r-values]            |
+| `MinUDPPort`          | Returned ENRs must advertise a UDP port above this value                      | `1024`                  | Local policy            | [Values][r-values]            |
 | `F_return`            | Maximum number of advertisements returned for one topic query                 | `16`                    | SHOULD                  | [Security][r-security]        |
 | `K_register`          | Target number of waiting or registered registrars per advertise bucket        | `10` (provisional)      | Local policy            | [Values][r-values]            |
 | `RegTableDepth`       | Number of advertise-table buckets                                             | `18`                    | Local policy            | [Values][r-values]            |
