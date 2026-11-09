@@ -950,9 +950,8 @@ handle TopDisc messages.
 
 ## Why These Parameter Values?
 
-The [parameters](./discv5-theory.md#parameters) marked Local policy are defaults, and those
-marked MUST are fixed by the protocol. Where a measurement or a bound supports a value, this
-section gives it. Where none does, the section says so, and the value is a working default
+Where a measurement or a bound supports the value of a
+[parameter](./discv5-theory.md#parameters), this section gives it. Where none does, the section says so, and the value is a working value
 rather than an optimum.
 
 ### Advertisement Lifetime
@@ -1066,7 +1065,7 @@ four values. `SearchUnreadLimit` equals `F_return`, one full response.
 
 ### Search IP Limits
 
-`SearchBucketPrefix` allows 2 registrars per /24 in a search bucket, and `SearchSubnetLimit`
+A search bucket allows 2 registrars per /24, and `SearchSubnetLimit`
 10 distinct node IDs per /24 in one search, each counted for `E` from its first query. Both values
 are those of the ordinary node table, which allows 2 per /24 in a bucket and 10 in the table.
 
@@ -1105,14 +1104,6 @@ and dropping such records keeps a response from directing a node's packets at sy
 
 Only the issuing registrar verifies a ticket, so its authentication is local. HMAC-SHA256 is one
 example, and interoperability does not depend on it.
-
-`TicketKeyUses` is 100,000. It limits how many outstanding tickets a single exposed key can
-affect; it is not a limit of the MAC. No measurement supports this value. `TicketKeyLifetime` is
-6 h from the key's last use, 16 times
-`RegAttemptBudget`, so a retired key is still present for any ticket an advertiser keeps waiting
-on. A ticket with a quote longer than the key lifetime can lose its credit. This is deliberate: an
-advertiser abandons a registrar at `RegAttemptBudget`, so a quote of hours serves no honest
-advertiser.
 
 `UsedTicketLimit` is 16,384. A ticket can be replayed only within `UsedTicketTTL`, 15 s after it
 is credited, so the limit covers about 1,090 credited tickets per second, against about 1.1

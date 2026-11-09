@@ -43,8 +43,8 @@ packets smaller than this size.
 
 Since low-latency communication is expected, implementations should place short timeouts
 on request/response interactions. Good timeout values are 500ms for a single
-request/response and 1s for the handshake. TopDisc requests use `RespTimeout`; see the
-[theory section on parameters].
+request/response and 1s for the handshake. TopDisc requests use a timeout of 700 ms for each response
+packet.
 
 When responding to a request, the response should be sent to the UDP envelope address of
 the request.
@@ -229,7 +229,7 @@ When several nodes qualify for a distance, the recipient picks one at random. A 
 with no such node contributes no ENR. An entry that is `0` or above `256` is ignored, a
 repeated entry yields at most one ENR, and an empty list requests no auxiliary ENRs. A
 recipient that caps the number of auxiliary ENRs serves the earliest listed distances first;
-by default it serves the first 8 distances, so it returns at most 8 ENRs. Unlike FINDNODE,
+it serves the first 8 distances, so it returns at most 8 ENRs. Unlike FINDNODE,
 the recipient need not have verified that the node is alive. See the [theory section on
 auxiliary ENRs].
 
@@ -278,8 +278,8 @@ populate its service table.
 
 The list is in priority order: a recipient that caps the number of auxiliary ENRs serves the
 earliest listed distances first. A sender names its closest table bucket as the largest
-distance that bucket holds, `257 - depth` for a table of `depth` buckets (239 at the default
-depth of 18); see the [theory section on service tables].
+distance that bucket holds, `257 - depth` for a table of `depth` buckets (239 at depth
+18); see the [theory section on service tables].
 
 A decoded REGTOPIC is always answered with a single REGCONFIRMATION response, including
 requests that the registrar rejects and requests carrying an invalid, expired or already used
@@ -388,7 +388,7 @@ NODES messages carrying auxiliary ENRs) the recipient will send for this request
 REGTOPIC, responses may arrive in any order and the first `total` received applies.
 Implementations may place a limit on the allowed maximum for `total`; if exceeded,
 additional responses may be ignored. Implementations may also limit list lengths and the
-number of ENRs per response; see the [theory section on parameters] for the defaults.
+number of ENRs per response; see the [theory section on response limits] for the limits.
 
 The recipient MUST NOT return expired advertisements from its ad cache and MUST NOT return
 more than `F_return` advertisements for one query. When the ad cache contains more than
@@ -410,9 +410,9 @@ A collection of test vectors for this specification can be found at
 [theory section on the waiting-time function]: ./discv5-theory.md#waiting-time-function
 [theory section on lookup responses]: ./discv5-theory.md#lookup-responses
 [theory section on the lookup procedure]: ./discv5-theory.md#lookup-procedure
-[theory section on parameters]: ./discv5-theory.md#parameters
 [theory section on auxiliary ENRs]: ./discv5-theory.md#auxiliary-enr-selection
 [theory section on service tables]: ./discv5-theory.md#service-tables
 [public]: ./discv5-theory.md#public-addresses
 [EIP-778]: ../enr.md
+[theory section on response limits]: ./discv5-theory.md#response-splitting
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md
