@@ -950,9 +950,8 @@ handle TopDisc messages.
 
 ## Why These Parameter Values?
 
-The [parameters](./discv5-theory.md#parameters) marked Local policy are defaults, and those
-marked MUST are fixed by the protocol. Where a measurement or a bound supports a value, this
-section gives it. Where none does, the section says so, and the value is a working default
+Where a measurement or a bound supports the value of a
+[parameter](./discv5-theory.md#parameters), this section gives it. Where none does, the section says so, and the value is a working value
 rather than an optimum.
 
 ### Advertisement Lifetime

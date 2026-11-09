@@ -229,7 +229,7 @@ When several nodes qualify for a distance, the recipient picks one at random. A 
 with no such node contributes no ENR. An entry that is `0` or above `256` is ignored, a
 repeated entry yields at most one ENR, and an empty list requests no auxiliary ENRs. A
 recipient that caps the number of auxiliary ENRs serves the earliest listed distances first;
-by default it serves the first 8 distances, so it returns at most 8 ENRs. Unlike FINDNODE,
+it serves the first 8 distances, so it returns at most 8 ENRs. Unlike FINDNODE,
 the recipient need not have verified that the node is alive. See the [theory section on
 auxiliary ENRs].
 
@@ -278,8 +278,8 @@ populate its service table.
 
 The list is in priority order: a recipient that caps the number of auxiliary ENRs serves the
 earliest listed distances first. A sender names its closest table bucket as the largest
-distance that bucket holds, `257 - depth` for a table of `depth` buckets (239 at the default
-depth of 18); see the [theory section on service tables].
+distance that bucket holds, `257 - depth` for a table of `depth` buckets (239 at depth
+18); see the [theory section on service tables].
 
 A decoded REGTOPIC is always answered with a single REGCONFIRMATION response, including
 requests that the registrar rejects and requests carrying an invalid, expired or already used
@@ -388,7 +388,7 @@ NODES messages carrying auxiliary ENRs) the recipient will send for this request
 REGTOPIC, responses may arrive in any order and the first `total` received applies.
 Implementations may place a limit on the allowed maximum for `total`; if exceeded,
 additional responses may be ignored. Implementations may also limit list lengths and the
-number of ENRs per response; see the [theory section on response limits] for the defaults.
+number of ENRs per response; see the [theory section on response limits] for the limits.
 
 The recipient MUST NOT return expired advertisements from its ad cache and MUST NOT return
 more than `F_return` advertisements for one query. When the ad cache contains more than
