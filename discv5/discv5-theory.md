@@ -656,9 +656,9 @@ The score is the fraction of the `D` prefixes that contribute a point, or `0` if
 If an advertisement contains addresses from both families, `score(ad.IP)` is the larger of the two
 scores.
 
-Public IP addresses are not required to use TopDisc, but a **LAN address**, that is a loopback,
-private or link-local address, is not scored: it contributes `0`. It is still inserted into the tree,
-so it counts towards `N`. An IPv4-mapped IPv6 address is treated as the IPv4 address it contains.
+Public IP addresses are not required to use TopDisc. A **LAN address** (a loopback, private or
+link-local address) always has a score of `0`. An IPv4-mapped IPv6 address is treated as the IPv4
+address it contains.
 
 ### Waiting-Time Lower Bound
 
