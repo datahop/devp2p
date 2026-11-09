@@ -501,8 +501,7 @@ list requests no auxiliary ENRs.
 
 The requester lists the topic-distances in priority order, and a registrar that caps auxiliary ENRs
 serves the earliest listed distances first. By default a registrar serves at most the first
-`AuxENRLimit = 8` listed distances, so it returns at most 8 auxiliary ENRs (see
-[Parameters](#parameters)). It draws them from its ordinary node table, keeping TopDisc-capable
+`AuxENRLimit = 8` listed distances, so it returns at most 8 auxiliary ENRs. It draws them from its ordinary node table, keeping TopDisc-capable
 nodes whose endpoint address is [public](#public-addresses), and picks one at random per
 distance. Unlike [FINDNODE] responses, these ENRs are not restricted to nodes whose liveness the
 registrar has verified. An advertiser lists the distances of its advertise buckets from farthest
@@ -937,7 +936,7 @@ A candidate is not added to a bucket if:
 2. it is in the advertiser's failed set or overloaded set for `s` (see
    [Registration Procedure](#registration-procedure));
 3. the bucket already holds `RegStandbyLimit` standby candidates;
-4. another registrar in the bucket has an address in the same `/24` prefix (`RegBucketPrefix`). The
+4. another registrar in the bucket has an address in the same `/24` prefix. The
    limit applies to the node's [endpoint address](#public-addresses), with the same
    prefix length for both families. A registrar holds its prefix slot
    until it is removed from the bucket; or
@@ -1212,7 +1211,7 @@ advertise a supported `td` version, drops an advertisement of the discoverer its
 the advertised ENRs.
 Advertisements are candidate results for the target service. The caller may
 stop lookup when it has collected enough distinct advertisers for its local or service-specific
-purpose. This target is denoted `F_lookup` in this document and is determined by the application
+purpose. This target is determined by the application
 or local implementation policy. It is a caller-side result target, and has no protocol-wide fixed default. A caller stopping
 before reaching its target retains the valid advertisers collected so far. The search iterator
 continues through successive passes until the caller closes it or the discovery system shuts down.
@@ -1300,7 +1299,7 @@ spare, see [Lookup Procedure](#lookup-procedure));
 8. inserting the node does not violate the bucket's IP-prefix diversity restriction.
 
 As part of the IP-prefix diversity restriction, a search bucket by default holds at most two
-candidates from the same `/24` prefix (`SearchBucketPrefix`). As in the advertise table, the limit applies to the node's endpoint address, IPv4 or
+candidates from the same `/24` prefix. As in the advertise table, the limit applies to the node's endpoint address, IPv4 or
 IPv6, with the same prefix length for both families. The search table is filled
 afresh for each pass, so the restriction holds within one pass. A registrar that answered keeps
 its prefix slot for the rest of the pass, so another node from the same `/24` cannot take its
@@ -1318,13 +1317,11 @@ according to the TopDisc failure-handling rules.
 
 ## Parameters
 
-This section lists the TopDisc parameters. The status column gives the rule that applies to it:
+This section lists the main TopDisc parameters. The status column gives the rule that applies to it:
 
 - **MUST**: the value is visible on the wire or shared between nodes; all implementations use it.
 - **SHOULD**: the behaviour is recommended to all implementations, with the given value.
 - **Local policy**: the value is an implementation choice; the given value is the recommended one.
-
-### Main Parameters
 
 | Parameter             | Meaning                                                                       | Value                   | Status                  | Rationale                     |
 |-----------------------|-------------------------------------------------------------------------------|-------------------------|-------------------------|-------------------------------|
@@ -1336,55 +1333,22 @@ This section lists the TopDisc parameters. The status column gives the rule that
 | `Wbase`               | Base waiting-time factor, `base(0) = Wbase * E`                               | `0.1`                   | Local policy            | [Waiting time][r-wait]        |
 | `Pocc`                | Occupancy exponent in the waiting-time function                               | `10`                    | Local policy            | [Waiting time][r-wait]        |
 | `G`                   | Safety constant of the waiting-time function, not lower-bounded               | `10^-7`                 | Local policy            | [Waiting time][r-wait]        |
+| `maxWaitTime`         | Cap on a computed waiting time and on recorded lower bounds                   | `24 h`                  | Local policy            | [Waiting time][r-wait]        |
 | `F_return`            | Maximum number of advertisements returned for one topic query                 | `16`                    | MUST                    | [Security][r-security]        |
 | `K_register`          | Target number of waiting or registered registrars per advertise bucket        | `10`                    | Local policy            | [Values][r-values]            |
 | `RegTableDepth`       | Number of advertise-table buckets                                             | `18`                    | Local policy            | [Values][r-values]            |
-| `RegBucketPrefix`     | Prefix length and registrars allowed per prefix in an advertise bucket        | `/24`, `1` per bucket   | Local policy            | [Values][r-values]            |
 | `RegAttemptBudget`    | Largest single or total quoted waiting time before an attempt is abandoned    | `1.5 * E`               | SHOULD                  | [Scheduling][r-schedule]      |
-| `RegSenders`          | Concurrent registration requests per advertised service                       | `4`                     | SHOULD                  | [Scheduling][r-schedule]      |
-| `F_lookup`            | Caller/application-defined target number of distinct advertiser results       | Caller-defined          | Local policy            | —                             |
 | `SearchTableDepth`    | Number of search-table buckets                                                | `18`                    | Local policy            | [Values][r-values]            |
-| `SearchBucketSize`    | Maximum candidate capacity of one search bucket                               | `8`                     | Local policy            | [Values][r-values]            |
-| `SearchBucketPrefix`  | Prefix length and registrars allowed per prefix in a search bucket            | `/24`, `2` per bucket   | Local policy            | [Values][r-values]            |
 | `SearchSubnetLimit`   | Distinct registrars queried per `/24` in a lookup, each counted for `E`       | `10`                    | Local policy            | [Values][r-values]            |
 | `SearchYieldFloor`    | Yield threshold for staying at the responding bucket instead of moving closer | `8`                     | Local policy            | [Adaptive search][r-adaptive] |
 | `SearchAuxRadius`     | Range around active bucket for aux requests and fallback replies moving it    | `1`                     | Local policy            | [Aux ENRs][r-aux]             |
-| `SearchPassQueries`   | Maximum number of queries in one search pass                                  | `32`                    | Local policy            | [Passes][r-passes]            |
-| `SearchPassGap`       | Minimum spacing between the starts of consecutive search passes               | `2 sec`                 | SHOULD                  | [Passes][r-passes]            |
-| `SearchPassBackoff`   | Maximum spacing between search passes after idle passes                       | `60 sec`                | SHOULD                  | [Passes][r-passes]            |
 | `SearchMixRegistrars` | Release threshold: registrars that replied with results, checked per query    | `10`                    | SHOULD                  | [Filter and mix][r-filter]    |
 | `SearchMixWait`       | Release threshold: wait of first queued result or of a lone registrar's queue | `5 sec`                 | SHOULD                  | [Filter and mix][r-filter]    |
 
-### Implementation Defaults
+Other named values in this document bound local state, message sizes and timers. They are
+implementation defaults: an implementation MAY choose different values unless the text requires
+one.
 
-These values bound local state, message sizes and timers.
-
-| Parameter             | Meaning                                                                       | Value                   | Status                  | Rationale                     |
-|-----------------------|-------------------------------------------------------------------------------|-------------------------|-------------------------|-------------------------------|
-| `OverloadedTTL`       | How long an over-budget registrar stays in the advertiser's overloaded set    | `E`                     | Local policy            | [Values][r-values]            |
-| `AskedFailedTTL`      | How long the asked and failed sets of an operation hold a registrar           | `E`                     | Local policy            | [Values][r-values]            |
-| `UsedTicketTTL`       | How long a credited ticket is nominally remembered, from crediting            | `δ + ε`                 | Local policy            | [Values][r-values]            |
-| `UsedTicketLimit`     | Remembered credited tickets; the oldest is dropped when full                  | `16,384`                | Local policy            | [Values][r-values]            |
-| `TicketKeyLifetime`   | If tickets use a rotating MAC key: lifetime of a key after its last use       | `6 h`                   | Local policy            | [Values][r-values]            |
-| `TicketKeyUses`       | If tickets use a rotating MAC key: tickets sealed with a key before a new one | `100,000`               | Local policy            | [Values][r-values]            |
-| `maxWaitTime`         | Cap on a computed waiting time and on recorded lower bounds                   | `24 h`                  | Local policy            | [Waiting time][r-wait]        |
-| `AuxENRLimit`         | Topic-distances served per request, so auxiliary ENRs returned per request    | `8`                     | Local policy            | [Values][r-values]            |
-| `RegAuxAccept`        | Auxiliary ENRs accepted per REGTOPIC request                                  | `8`                     | Local policy            | [Values][r-values]            |
-| `QueryAuxAccept`      | Auxiliary ENRs accepted per TOPICQUERY request                                | `16`                    | Local policy            | [Values][r-values]            |
-| `ENRsPerPacket`       | ENRs per NODES or TOPICNODES packet answering REGTOPIC or TOPICQUERY          | `3`                     | Local policy            | [Values][r-values]            |
-| `MaxTopicDistances`   | Longest topic-distance list decoded in a REGTOPIC or TOPICQUERY               | `256`                   | Local policy            | [Values][r-values]            |
-| `MaxTopicNodes`       | Most ENRs decoded in one TOPICNODES                                           | `16`                    | Local policy            | [Values][r-values]            |
-| `RegRespLimit`        | Cap on the announced `total` of a REGTOPIC; REGCONFIRMATION is still awaited  | `8`                     | Local policy            | [Values][r-values]            |
-| `QueryRespLimit`      | Responses to one TOPICQUERY that the discoverer waits for                     | `16`                    | Local policy            | [Values][r-values]            |
-| `RespTimeout`         | Time to wait for each response packet before a request times out              | `700 ms`                | Local policy            | [Values][r-values]            |
-| `MinUDPPort`          | Returned ENRs must advertise a UDP port above this value                      | `1024`                  | Local policy            | [Values][r-values]            |
-| `RegStandbyLimit`     | Maximum number of standby candidates per advertise bucket                     | `20`                    | Local policy            | [Values][r-values]            |
-| `RegLoopMinPeriod`    | Minimum period between re-reads of the node table by the advertiser           | `2 sec`                 | Local policy            | [Values][r-values]            |
-| `SearchYieldWindow`   | Yield samples kept per search bucket                                          | `4`                     | Local policy            | [Values][r-values]            |
-| `SearchMinSamples`    | Yield samples a bucket needs before a response moves the active bucket        | `2`                     | Local policy            | [Values][r-values]            |
-| `SearchMaxJump`       | Largest move toward `s` after one yield sample, in buckets                    | `4`                     | Local policy            | [Values][r-values]            |
-| `SearchUnreadLimit`   | Unread results at which the discoverer stops sending queries                  | `16`                    | SHOULD                  | [Passes][r-passes]            |
-| `SearchFilterSize`    | Maximum number of entries in the lookup result filter                         | `50,000`                | SHOULD                  | [Values][r-values]            |
 ## Implementation Considerations
 
 ### ENR Freshness
@@ -1430,7 +1394,7 @@ send the [REGCONFIRMATION] first and SHOULD NOT announce a `total` above 8, the 
 A node that limits the topic-distances it serves uses the earliest listed and ignores the rest, and
 still answers the request. A topic-distance list of more than `MaxTopicDistances = 256` entries is
 invalid and need not be answered. A node does not decode a [TOPICNODES] holding more than
-`MaxTopicNodes = 16` ENRs. See [Parameters](#parameters).
+`MaxTopicNodes = 16` ENRs.
 
 ### Wire Encoding
 
