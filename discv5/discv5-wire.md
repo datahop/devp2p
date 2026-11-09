@@ -211,25 +211,26 @@ When handling NODES as a response to FINDNODE, the recipient should verify that 
 received nodes match the requested distances.
 
 When NODES appears as a response to REGTOPIC or TOPICQUERY, it carries auxiliary ENRs:
-candidate registrars that the requester can add to its service table `B(s)`. They come from
-the responder's ordinary node table, not from its ad cache, so an auxiliary ENR says nothing
+candidate registrars that the requester can add to its service table `B(topic)`. They come from
+the recipient's ordinary node table, not from its ad cache, so an auxiliary ENR says nothing
 about whether that node advertises `topic`. The advertisers registered for `topic` are
 returned in TOPICNODES.
 
-For each entry `d` in the request's `topic-distance` list, in list order, the responder
+For each entry `d` in the request's `topic-distance` list, in list order, the recipient
 SHOULD return at most one ENR of a node `n` that meets all of these conditions:
 
 - `logdistance(topic, n) = d`. The distance is measured from `topic`, not from the
-  responder's node ID as in FINDNODE.
+  recipient's node ID as in FINDNODE.
 - The ENR advertises a supported `td` version.
-- The node's address may be relayed to the requester, under the same rule as NODES
-  responses to FINDNODE.
+- The node's address passes the [relay rule] with respect to the requester's address.
 
-When several nodes qualify for a distance, the responder picks one at random. A distance
-with no such node contributes no ENR. A responder that caps the number of auxiliary ENRs
-serves the earliest listed distances first; by default it serves the first 8 distances, so
-it returns at most 8 ENRs. Unlike FINDNODE, the responder need not have verified that the
-node is alive. See the [theory section on auxiliary ENRs].
+When several nodes qualify for a distance, the recipient picks one at random. A distance
+with no such node contributes no ENR. An entry that is `0` or above `256` is ignored, a
+repeated entry yields at most one ENR, and an empty list requests no auxiliary ENRs. A
+recipient that caps the number of auxiliary ENRs serves the earliest listed distances first;
+by default it serves the first 8 distances, so it returns at most 8 ENRs. Unlike FINDNODE,
+the recipient need not have verified that the node is alive. See the [theory section on
+auxiliary ENRs].
 
 ### TALKREQ Request (0x05)
 
@@ -275,7 +276,8 @@ distance to `topic` matches one of the listed values, so the response helps the 
 populate its service table.
 
 The list is in priority order: a recipient that caps the number of auxiliary ENRs serves the
-earliest listed distances first.
+earliest listed distances first. A sender names its closest table bucket, which holds all
+distances 239 and below, as distance 239; see the [theory section on service tables].
 
 A decoded REGTOPIC is always answered with a single REGCONFIRMATION response, including
 requests that the registrar rejects and requests carrying an invalid, expired or already used
@@ -284,10 +286,12 @@ ENRs (see NODES). It sends no NODES responses when it rejects the request or ans
 presented before its window.
 
 The registrar MUST reject the request if `ENR` is not a valid node record, if its node ID
-is not the sender's, if it holds no address of the packet's address family, if that address
-differs from the packet's source address, or if it holds an address of the other family that
-is not publicly routable. Discoverers dial the advertised record, not the packet source, so
-the record's addresses must be ones the registrar has seen or that can be reached.
+is not the sender's, if it holds no IP address of the packet's address family, if that IP
+address differs from the packet's source IP address, or if it holds an IP address of the
+other family that is not publicly routable (see the [relay rule] section for address
+classes). Only IP addresses are compared: the UDP port is ignored. Discoverers dial the
+advertised record, not the packet source, so the record's addresses must be ones the
+registrar has seen or that can be reached.
 
 See the [theory section on tickets] and [theory section on registrar admission control]
 for the registrar's waiting-time semantics.
@@ -297,13 +301,15 @@ for the registrar's waiting-time semantics.
     message-data = [request-id, total, ticket, wait-time]
     message-type = 0x08
     request-id   = request-id of REGTOPIC
-    total        = total number of responses (REGCONFIRMATION + NODES) to the request
+    total        = total number of responses (REGCONFIRMATION + NODES) to the request, an
+                   RLP unsigned integer of at most 255
     ticket       = ticket issued by the registrar for the next attempt;
                    empty byte array (RLP: `0x80`) when the registration was admitted
                    or rejected
-    wait-time    = milliseconds to wait before submitting the next REGTOPIC attempt
-                   with the returned `ticket`. When `ticket` is empty, `wait-time` carries
-                   the advertisement lifetime instead, or `0` for a rejection.
+    wait-time    = RLP unsigned integer: milliseconds to wait before submitting the next
+                   REGTOPIC attempt with the returned `ticket`. When `ticket` is empty,
+                   `wait-time` carries the advertisement lifetime instead, or `0` for a
+                   rejection.
 
 REGCONFIRMATION is the response to REGTOPIC. It is sent immediately by the registrar and
 plays three roles, distinguished by `ticket` and `wait-time`:
@@ -319,18 +325,22 @@ plays three roles, distinguished by `ticket` and `wait-time`:
   tickets] and the [theory section on the waiting-time function].
 - If `ticket` is the empty byte array and `wait-time` is `0`, the registrar rejected the
   request. `total` is `1`. The advertiser MUST NOT treat the advertisement as admitted and
-  SHOULD NOT retry this registrar at once. A rejection shows that the registrar is reachable;
-  it is not a liveness failure.
+  adds the registrar to its failed set for `E`. A rejection shows that the registrar is
+  reachable; it is not a liveness failure.
 
 When the sender presents a ticket before its window, the registrar answers with the same
 `ticket` bytes it received and the remaining wait in `wait-time`, and sends no NODES
 responses, as described in the [theory section on tickets].
 
-An advertiser MUST accept any `wait-time` value. A value too large for its local duration
-type is saturated to the largest value it can hold, which exceeds any attempt budget.
+An advertiser MUST accept any `wait-time` that decodes. A value too large for its local
+duration type is saturated to the largest value it can hold, which exceeds any attempt
+budget.
 
 The `total` field announces the total number of responses (this REGCONFIRMATION plus any
 NODES messages carrying auxiliary ENRs) that the registrar will send for this request.
+Responses may arrive in any order and are matched by `request-id`. The registrar sets the
+same `total` in every response; the requester uses the value of the first response it
+receives.
 
 ### TOPICQUERY Request (0x09)
 
@@ -362,22 +372,24 @@ parameters] for `F_return`.
     message-data = [request-id, total, [ENR, ...]]
     message-type = 0x0a
     request-id   = request-id of TOPICQUERY
-    total        = total number of responses (NODES + TOPICNODES) to the request
+    total        = total number of responses (NODES + TOPICNODES) to the request, an RLP
+                   unsigned integer of at most 255
 
 TOPICNODES is the dedicated response to TOPICQUERY carrying advertiser ENRs that are
 currently registered for the requested topic in the recipient's ad cache. Multiple
 TOPICNODES messages may be sent for a single TOPICQUERY.
 
 The `total` field announces the total number of responses (TOPICNODES messages plus any
-NODES messages carrying auxiliary ENRs) the recipient will send for this request.
+NODES messages carrying auxiliary ENRs) the recipient will send for this request. As for
+REGTOPIC, responses may arrive in any order and the first `total` received applies.
 Implementations may place a limit on the allowed maximum for `total`; if exceeded,
 additional responses may be ignored. Implementations may also limit list lengths and the
 number of ENRs per response; see the [theory section on parameters] for the defaults.
 
-The recipient MUST NOT return expired advertisements from its ad cache. When the
-ad cache contains more than `F_return` advertisements for the topic, the recipient
-SHOULD return a pseudo-random subset of at most `F_return` of them, as specified in the
-[theory section on lookup responses].
+The recipient MUST NOT return expired advertisements from its ad cache and MUST NOT return
+more than `F_return` advertisements for one query. When the ad cache contains more than
+`F_return` advertisements for the topic, the recipient SHOULD return a pseudo-random subset
+of `F_return` of them, as specified in the [theory section on lookup responses].
 
 TOPICNODES carries only registered advertisers. Auxiliary routing information for the
 sender's service table is carried separately via NODES responses.
@@ -395,5 +407,7 @@ A collection of test vectors for this specification can be found at
 [theory section on the lookup procedure]: ./discv5-theory.md#lookup-procedure
 [theory section on parameters]: ./discv5-theory.md#parameters
 [theory section on auxiliary ENRs]: ./discv5-theory.md#auxiliary-enr-selection
+[theory section on service tables]: ./discv5-theory.md#service-tables
+[relay rule]: ./discv5-theory.md#address-classes-and-relaying
 [EIP-778]: ../enr.md
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md
