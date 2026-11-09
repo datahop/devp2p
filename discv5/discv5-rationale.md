@@ -972,7 +972,13 @@ spreads discovered nodes better, and resists sybil and denial-of-service attacks
 
 ### Ad Cache and Waiting Times
 
-`C` is 5,000 by default. No measurement in this document compares values.
+`C` is 1,000. A 25,000-node simulation with the service sizes of a discv5 crawl and no attackers
+compared 500, 1,000, 2,500 and 5,000, averaged over three runs. From 5,000 to 1,000, the
+advertisements held by the busiest registrar fell from 1,011 to 233 and its REGTOPIC requests from
+68,800 to 50,500. Recall stayed at 100 %, and t90 for services with 1,000 or more advertisers rose
+from 109 s to 116 s. Advertisers abandoned a registrar more often, 131 times per advertiser against
+23. At 500, abandonment about doubled again for a further fall to 138 advertisements. Occupancy of
+the busiest registrar stopped at 20 to 28 % at every size.
 
 `Pocc` is 10 and `Wbase` is 0.1. `Wbase` makes an empty cache charge at most `E / 10` for a fully
 similar advertisement. With these values the safety term reaches `E` at about 84 % occupancy and
@@ -1109,8 +1115,8 @@ advertiser abandons a registrar at `RegAttemptBudget`, so a quote of hours serve
 advertiser.
 
 `UsedTicketLimit` is 16,384. A ticket can be replayed only within `UsedTicketTTL`, 15 s after it
-is credited, so the limit covers about 1,090 credited tickets per second, against about 5.6
-admissions per second for a full cache of 5,000 at `E = 15 min`. The MACs and expiry times take about 0.7 MB. Only
+is credited, so the limit covers about 1,090 credited tickets per second, against about 1.1
+admissions per second for a full cache of 1,000 at `E = 15 min`. The MACs and expiry times take about 0.7 MB. Only
 a flood of credited tickets reaches the limit, and the oldest entries, those of the flood, are
 dropped first.
 
@@ -1147,8 +1153,8 @@ to another registrar from its standby list.
 Neither address rule aggregates IPv6 addresses at an operator's allocation, such as a `/48` or
 a `/64`. The advertise and search tables apply the IPv4 `/24` prefix length to IPv6 addresses,
 which groups addresses far more coarsely than any single allocation. The IP similarity tree
-considers only prefix lengths `k` with `2^k <= N`, which is at most `12` bits with `C = 5,000`.
-Two IPv6 addresses are therefore compared only on their first `12` bits.
+considers only prefix lengths `k` with `2^k <= N`, which is at most `9` bits with `C = 1,000`.
+Two IPv6 addresses are therefore compared only on their first `9` bits.
 
 ### LAN Addresses
 

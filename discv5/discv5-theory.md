@@ -558,7 +558,7 @@ rules.
 A registrar stores admitted advertisements in a bounded ad cache.
 
 Each admitted advertisement expires after duration `E = 15 min`. The ad cache has capacity
-`C = 5,000`, a hard limit: a registrar MUST NOT hold more than `C` advertisements. A registrar
+`C = 1,000`, a hard limit: a registrar MUST NOT hold more than `C` advertisements. A registrar
 stores at most one active advertisement for the same advertiser and service.
 
 A full cache computes `maxWaitTime` (see [Waiting-Time Function](#waiting-time-function)), so it
@@ -1342,7 +1342,7 @@ This section lists the TopDisc parameters. The status column gives the rule that
 | Parameter             | Meaning                                                                       | Value                   | Status                  | Rationale                     |
 |-----------------------|-------------------------------------------------------------------------------|-------------------------|-------------------------|-------------------------------|
 | `E`                   | Advertisement lifetime; also the lifetime of the asked and failed sets        | `15 min`                | MUST                    | [Values][r-values]            |
-| `C`                   | Registrar ad cache capacity, a hard limit                                     | `5,000`                 | Local policy            | [Values][r-values]            |
+| `C`                   | Registrar ad cache capacity, a hard limit                                     | `1,000`                 | Local policy            | [Values][r-values]            |
 | `δ`                   | Registration window after a ticket's waiting time                             | `5 sec`                 | MUST                    | [Values][r-values]            |
 | `ε`                   | Late grace after the window in which a ticket is still credited               | `10 sec`                | Local policy            | [Answers][r-answer]           |
 | `W_min`               | Admission slack and minimum quote; shorter quotes are waited as `W_min`       | `1 sec`                 | SHOULD; advertiser MUST | [Answers][r-answer]           |
