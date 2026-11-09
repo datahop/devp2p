@@ -1093,7 +1093,7 @@ authentication tag of at least 87 bytes.
 `RegRespLimit` is 8 and `QueryRespLimit` is 16. `total` includes the REGCONFIRMATION, so
 `RegRespLimit` leaves seven NODES packets, and in a TOPICQUERY the NODES and TOPICNODES packets
 share the 16. The caps keep a registrar from holding a request open by announcing a large
-`total`. `MaxTopicDistances` is 256 because a request has one entry per log-distance.
+`total` or by continuing to send packets. `MaxTopicDistances` is 256 because a request has one entry per log-distance.
 `MaxTopicNodes` is 16, the FINDNODE result limit and `F_return`.
 
 `RespTimeout` is 700 ms, the timeout of other discv5 requests. A timeout counts
