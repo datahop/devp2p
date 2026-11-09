@@ -1020,8 +1020,10 @@ before retrying and keeps the registrar. The clamped value counts toward `RegAtt
 quoted value too large for the advertiser's duration type is saturated, and so exceeds the budget.
 The lifetime in an admission is capped at `E`.
 
-A registration attempt fails if the request times out, the registrar rejects the request, or it
-returns a malformed response. On failure, the advertiser removes
+A registration attempt fails if the request times out before the [REGCONFIRMATION] arrives, the
+registrar rejects the request, or it returns a malformed response. A timeout after the
+[REGCONFIRMATION] does not fail the attempt: only auxiliary ENRs are missing, so the advertiser keeps
+the confirmation and the ENRs received. On failure, the advertiser removes
 the registrar from the bucket, fills the slot from the standby candidates, and adds the registrar to
 its **failed set** for `s`, by node ID. A registrar in the failed set is not added to the
 advertise table again, from any source, for `E` from the time it was first added.
@@ -1432,7 +1434,10 @@ responses, after any cap below; for a [REGTOPIC] it also needs the [REGCONFIRMAT
 
 A requester MAY cap the number of responses it waits for. By default, an advertiser caps the
 announced `total` of a [REGTOPIC] at `RegRespLimit = 8` but keeps waiting for the [REGCONFIRMATION]
-until it arrives or the request fails or times out, and a discoverer waits for at most
+until it arrives, the request fails or times out, or `RegRespLimit` packets of any type have
+arrived for the request, which fails the attempt if none was the [REGCONFIRMATION]. A discoverer
+stops after `QueryRespLimit` packets of any type and treats what arrived as a partial response if
+`total` was not reached. A discoverer waits for at most
 `QueryRespLimit = 16` responses to a [TOPICQUERY], even if `total` is higher, and keeps at most
 `F_return` advertisements and `QueryAuxAccept` auxiliary ENRs from them. A registrar by default
 sends at most `ENRsPerPacket = 3` ENRs per [NODES] or [TOPICNODES] response.
