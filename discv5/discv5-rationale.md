@@ -799,6 +799,10 @@ prefix limits can harm honest users behind NATs, shared hosting providers, or ot
 infrastructure. A similarity score instead increases cost gradually as concentration
 increases.
 
+LAN addresses are not scored and are exempt from the `/24` limits. A registrar admits an
+advertisement only if its ENR address equals the packet source, so it accepts a LAN address only
+from its own network, where a prefix says nothing about who controls a node.
+
 ## Why Change the Waiting-Time Function?
 
 The [waiting-time function] differs from the form in [DISC-NG], which multiplies

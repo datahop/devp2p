@@ -348,19 +348,6 @@ An **advertiser** registers advertisements for a service it participates in. A *
 queries registrars for the advertisements of a service. A node can hold all three roles at once,
 for any number of services.
 
-## Public Addresses
-
-TopDisc accepts only public IP addresses: globally routable unicast addresses, as opposed to
-unspecified, loopback, private, link-local, multicast or other special-purpose addresses. An
-IPv4-mapped IPv6 address is treated as the IPv4 address it contains.
-
-A node's **endpoint address** is the IPv4 address in its ENR if that address is public, and
-otherwise its IPv6 address. The node's UDP port is the `udp` value for an IPv4 endpoint address,
-and the `udp6` value, or `udp` if there is none, for an IPv6 endpoint address.
-
-A registrar returns only advertisements and auxiliary ENRs whose endpoint address is public. A
-requester discards every returned ENR whose endpoint address is not public.
-
 ## Service Tables
 
 A **service table** `B(s)` is a per-service table of registrars, centred on the service identifier
@@ -397,8 +384,12 @@ The tables differ in what a bucket holds:
 | A bucket has space when | it holds fewer than `RegStandbyLimit` standby candidates            | it holds fewer than `SearchBucketSize` candidates |
 | Distances requested    | every bucket with space ([Advertisement Placement](#advertisement-placement)) | buckets with space around the active bucket ([Updating the Search Table During Lookup](#updating-the-search-table-during-lookup)) |
 
-The `/24` limit applies to the node's [endpoint address](#public-addresses), IPv4 or IPv6, with the
-same prefix length for both families.
+The `/24` limit applies to the node's **endpoint address**, with the same prefix length for both
+families. The endpoint address is the more global of the IPv4 and IPv6 addresses in its ENR, in the
+order unspecified, loopback, link-local, private, any other address, or the IPv4 address if both are
+equally global. Multicast addresses are ignored. [LAN addresses](#ip-similarity-tree) are exempt from
+the limit. The node's UDP port is the `udp` value for an IPv4 endpoint address, and the `udp6` value,
+or `udp` if there is none, for an IPv6 endpoint address.
 
 ### Bootstrapping from Ordinary Node Discovery
 
@@ -431,11 +422,17 @@ requester's free buckets and stops a registrar from filling a response from one 
 
 A registrar serves at most the first `AuxENRLimit = 8` listed distances, whether or not each yields
 an ENR, so it returns at most 8 auxiliary ENRs. It draws them from its ordinary node table, keeping
-TopDisc-capable nodes whose endpoint address is [public](#public-addresses), skips ENRs that fail
-local validation or usability checks, and picks one at random per distance. A distance with no eligible ENR yields
+TopDisc-capable nodes that pass the relay rule below, skips ENRs that fail local validation or
+usability checks, and picks one at random per distance. A distance with no eligible ENR yields
 none. An entry that is `0` or above `256` is ignored, a repeated entry yields at most one ENR, and
 an empty list requests none. Unlike [FINDNODE] responses, these ENRs are not restricted to nodes
 whose liveness the registrar has verified.
+
+The **relay rule** decides whether a node's endpoint address may be passed to a peer. The address is
+rejected if it is invalid, unspecified or a special-purpose address, if it is a loopback address and
+the peer's address is not, or if it is a [LAN address](#ip-similarity-tree) and the peer's address is
+not. A registrar applies the rule to advertisements and auxiliary ENRs with the requester's address.
+A requester applies it to every returned ENR with the registrar's address.
 
 ### TopDisc Liveness and Temporary Exclusion
 
@@ -504,9 +501,10 @@ time in the ticket.
 Before computing a waiting time, the registrar checks the advertised ENR. It MUST reject the
 request if the ENR is invalid, if its node ID is not the sender's, if it holds no IP address of the
 packet's address family, if that IP address differs from the packet's source IP address, or if it
-holds an IP address that is not [public](#public-addresses) (see [REGTOPIC]). The ENR key (`ip` or
+holds an IP address of the other family that is unspecified, a special-purpose address or a
+[LAN address](#ip-similarity-tree) (see [REGTOPIC]). The ENR key (`ip` or
 `ip6`) decides an address's family for these checks; the mapping of IPv4-mapped addresses applies
-only to the public check and to comparison with the source address. Only IP addresses are compared:
+only to these checks and to comparison with the source address. Only IP addresses are compared:
 the UDP port is ignored. A rejection is answered with a [REGCONFIRMATION] carrying no ticket, a
 waiting time of `0`, and no auxiliary ENRs.
 
@@ -657,6 +655,10 @@ The score is the fraction of the `D` prefixes that contribute a point, or `0` if
 
 If an advertisement contains addresses from both families, `score(ad.IP)` is the larger of the two
 scores.
+
+Public IP addresses are not required to use TopDisc. A **LAN address** (a loopback, private or
+link-local address) always has a score of `0`. An IPv4-mapped IPv6 address is treated as the IPv4
+address it contains.
 
 ### Waiting-Time Lower Bound
 
@@ -819,7 +821,7 @@ oldest, since its ad cache is the most likely to have changed. A registrar that 
 during the current pass is not asked again in that pass.
 
 The discoverer limits the distinct registrars it queries per `/24` prefix during a lookup to
-`SearchSubnetLimit = 10` node IDs, by endpoint address. A registrar counts against its prefix from
+`SearchSubnetLimit = 10` node IDs, by endpoint address, with LAN addresses exempt. A registrar counts against its prefix from
 the time it is selected for a query, for `E` from that first query, also if the query fails. A
 registrar from a prefix that already counts `SearchSubnetLimit` other node IDs is not inserted into
 the search table, and candidates and spares of such a prefix that the table already holds are
@@ -911,7 +913,8 @@ is not idle resets the spacing to `SearchPassGap`. The discoverer SHOULD back of
 #### Result Delivery
 
 The discoverer validates advertisements as it validates auxiliary ENRs. The ENR must be valid. Its
-endpoint address must be [public](#public-addresses) and pass any configured network restrictions.
+endpoint address must pass the [relay rule](#auxiliary-enr-selection) and any configured network
+restrictions.
 Its UDP port must be greater than `MinUDPPort = 1024`, so port `1024` itself is rejected. An
 advertisement whose node ID was already returned by an earlier advertisement of the same query, in
 the same or another [TOPICNODES] packet, is dropped; this de-duplication is separate from that of
@@ -966,8 +969,8 @@ An ENR learned through lookup is eligible for insertion into the search table on
 3. the node is not temporarily excluded by local TopDisc usability policy, is not in the
    lookup's failed set, and its `/24` prefix has not reached `SearchSubnetLimit` (see
    [Registrar Selection](#registrar-selection));
-4. the node's endpoint address is [public](#public-addresses) and passes any configured network
-   restrictions;
+4. the node's endpoint address passes the [relay rule](#auxiliary-enr-selection) and any configured
+   network restrictions;
 5. the node's UDP port is greater than `MinUDPPort`;
 6. the node is not the discoverer itself or a duplicate candidate, has not answered or failed
    a query in the current pass, and is not in the lookup's asked set (such a node becomes a
