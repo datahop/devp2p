@@ -590,11 +590,14 @@ yielding `upper` advertisements per query is about `log2(SearchYieldFloor / uppe
 farther out than the first bucket expected to reach the floor, so the search jumps there
 directly.
 
-The value of the floor matters less than having one. In a 10,000-node testbed run, a floor
-of 4 cut the maximum number of TOPICQUERY requests received by one registrar from 640,319
-with no floor to 16,710. In a 30,000-node simulation, floors of 2, 4 and 8 performed alike,
-with a maximum of 2,026 to 2,068 TOPICQUERY requests per registrar against 15,020 with no
-floor.
+A floor limits the load on registrars, and its value sets the speed of the search. In a
+10,000-node testbed run, a floor of 4 cut the maximum number of TOPICQUERY requests received by
+one registrar from 640,319 with no floor to 16,710. In a 30,000-node simulation of one large
+service, floors of 2 and 4 settled where a response carries about four advertisements and took
+1,330 s and 1,297 s to find 90 % of the service's providers. Floors of 8 and 12 took 377 s and
+352 s, against 401 s with no floor, with half of its queries. With a floor of 8 the busiest
+registrar received about 2,000 queries, against about 150,000 with no floor. `SearchYieldFloor`
+is 8, the lowest of these values that keeps the speed of a search with no floor.
 
 A yield sample from a fallback bucket moves the active bucket only in the direction that
 advertisement density does not already predict. Low yield farther out than the active bucket,
@@ -622,10 +625,12 @@ had no advertisers when the lookup reached that bucket. Starting again at the fa
 lets the lookup find advertisers that appear later.
 
 Passes that find nothing new are spaced out, doubling from `SearchPassGap` up to
-`SearchPassBackoff`. In a 30,000-node simulation, a 60 s cap cut the 99th-percentile number
-of TOPICQUERY requests received per registrar from 1,423 without back-off to 1,143. For
-topics with 10 to 99 providers, it left t90, the time until a searcher has found 90 % of its
-topic's providers, unchanged; a 300 s cap about doubled t90.
+`SearchPassBackoff`. In a 30,000-node simulation with late-joining advertisers, a 60 s cap cut
+the TOPICQUERY requests received by the busiest registrar from 2,806 without back-off to 565. A
+late joiner in a topic with fewer than 10 providers was found 0.6 s later at the median and
+10 s later at the 90th percentile. For topics with 10 to 99 providers, t90, the time until a
+searcher has found 90 % of its topic's providers, went from 321 s to 350 s; a 300 s cap raised
+it to 510 s.
 
 The discoverer stops sending queries while `SearchUnreadLimit` results wait unread. A caller
 that reads slowly then does not cause queries whose results it would not use.
@@ -925,7 +930,10 @@ During lookup, auxiliary candidates are requested for topic-distances
 corresponding to the active search bucket and nearby buckets with available capacity.
 With `SearchAuxRadius = 1`, this normally covers the active bucket and its immediate
 neighbours. This helps replenish registrar candidates near the part of the
-service-centred key space currently being searched.
+service-centred key space currently being searched. In a 30,000-node simulation with the
+service sizes of a discv5 crawl, this radius cut the total number of TOPICQUERY requests from
+35.4 million, with auxiliary ENRs requested for every bucket with free space, to 2.7 million.
+Every service with fewer than 10 providers was still found in full.
 
 ## Why Support Mixed Deployments?
 
@@ -940,6 +948,152 @@ still participate in ordinary node discovery.
 TopDisc-capable nodes advertise support in their ENR. This allows implementations to build
 service tables from ordinary node discovery state while selecting only nodes that can
 handle TopDisc messages.
+
+## Why These Parameter Values?
+
+The [parameters](./discv5-theory.md#parameters) are defaults. Where a measurement or a bound
+supports a value, this section gives it. Where none does, the section says so, and the value is
+a working default rather than an optimum.
+
+### Advertisement Lifetime
+
+`E` is 15 minutes. In a 24-hour crawl of the discv5 network, nodes left at 1.7 to 3.4 % per
+hour, depending on how long a silence counts as leaving. With continuous renewal, that leaves
+0.2 to 0.4 % of advertisement time pointing at a departed node at 15 minutes, against 0.8 to
+1.2 % at 60 minutes. A 5-minute lifetime would save under 0.3 percentage points and about triple
+renewal traffic. A 25,000-node run replaying this churn at 16 times the rate returned 45 of 87
+million results from nodes down longer than `E`.
+
+The value is not an optimum: 30 minutes also stays under 1 % across all nodes, at about half the
+renewal traffic.
+An [earlier evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7f2324/doc/report_m4/reports/ad_lifetime.md)
+preferred a short lifetime because the network then stays easier for new nodes to register in,
+spreads discovered nodes better, and resists sybil and denial-of-service attacks better.
+
+### Advertise Table
+
+The size of the advertise table is a tradeoff between registration performance and the load on
+peak nodes, the registrars nearest the service identifier. Each bucket closer to the identifier
+covers half as much of the key space, so it holds about half as many registrars to take the same
+`K_register` advertisements. A larger bucket places more advertisements, but the traffic it adds
+falls on those registrars. An
+[earlier 2,000-node evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7f2324/doc/report_m4/reports/tickettable.md)
+found that registrations and traffic grew together with bucket size, without a matching gain in
+lookups.
+
+`K_register` is 10. The table gives a 50,000-node simulation with the service sizes of a discv5
+crawl and no attackers, averaged over two runs. Registrars per advertiser is the median number
+of registrars holding one advertiser's advertisements. Discovery time is t90 for services with
+1,000 or more advertisers.
+
+| `K_register` | Registrars per advertiser | REGTOPIC received per registrar, median / 99th percentile | Median admission wait | Discovery time |
+|---:|---:|---:|---:|---:|
+| 3  | 31  | 143 / 4,500   | 0.06 s | 369 s |
+| 5  | 48  | 248 / 7,500   | 0.18 s | 305 s |
+| 10 | 87  | 525 / 16,300  | 1.2 s  | 230 s |
+| 16 | 128 | 858 / 24,400  | 4.1 s  | 240 s |
+
+Discovery improves up to 10. At 16 it does not improve further, while the load grows by about
+60 %.
+
+`RegTableDepth` is 18. The closest bucket covers 2^-17 of the key space and absorbs anything
+closer, so it reaches `K_register` registrars only at about 1.3 million nodes, and the depth does
+not limit placement at the current network size. A smaller depth merges the registrars nearest
+the identifier into one bucket, which lowers the peak load but leaves rare services harder to
+find. In one 50,000-node simulation with 1,000 services of Zipf-distributed size, a depth of 10
+cut the REGTOPIC requests received by the busiest registrar from 53,777 to 25,894. It raised t90
+for services with fewer than 10 advertisers from 0.96 s to 15.9 s, and for 10 to 99 advertisers
+from 0.96 s to 2.5 s. Recall did not change.
+
+`RegStandbyLimit` is 20, enough candidates to replace a full bucket twice. It keeps the state of
+one bucket to 30 registrars. No measurement supports the exact value.
+
+`RegSenders` is 4, so that a ticket retry rarely waits for a timeout to a dead registrar to
+finish. `RegLoopMinPeriod` keeps the registration loop from spinning when the local node table is
+nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
+`RegAttemptBudget` is `1.5 * E`: after `E` every advertisement in the cache has been replaced, and
+the extra half lifetime keeps a quote close to `E` from ending the attempt. No measurement
+supports these four values.
+
+### Search Table and Pacing
+
+`SearchTableDepth` is 18, the same as the advertise table, so that a bucket covers the same part
+of the key space in both. `SearchBucketSize` is 8, which keeps one search to at most 144 candidate
+registrars. Results are not sensitive to the shape of this table: in a 30,000-node simulation with
+a yield floor of 4, 32 nodes per bucket instead of 16 and 14 buckets instead of 10 changed
+discovery time, total queries and the load on the busiest registrar by about 2 % or less. Eight
+has not been compared with larger values at the current parameters.
+
+`SearchYieldWindow` is 4 and `SearchMinSamples` is 2. A single response, which may come from a
+hostile registrar, cannot move the search, and four samples keep it reacting within a few queries.
+A search sends one query at a time, so that each sample can steer the next query. No measurement
+supports these two values.
+
+`SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at most
+`ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is 8: in
+the simulation above, 16 auxiliary ENRs per response made no measurable difference.
+
+`SearchPassGap` is 2 s, the shortest spacing of passes, and only passes that find something new
+stay at that spacing. `SearchPassQueries` bounds one pass. `SearchMixWait` bounds how long a
+result can wait when too few registrars have answered. A search that reaches `SearchFilterSize`
+forgets its oldest entries and may receive those advertisers again. No measurement supports these
+four values.
+
+### Search IP Limits
+
+`SearchBucketPrefix` allows 2 registrars per /24 in a search bucket, and `SearchSubnetLimit`
+10 distinct node IDs per /24 in one search, each counted for `E` from its first query. Both values
+are those of the ordinary node table, which allows 2 per /24 in a bucket and 10 in the table.
+
+A per-bucket limit alone has no memory: the search table is rebuilt every pass, so an attacker
+with a few /24 networks can present new node IDs on each pass. In a 30,000-node simulation with
+honest addresses from a discv5 crawl and an attacker on two /24 networks answering with useless
+advertisements, the per-bucket limit alone left 92.1 % of queries going to sybils. With the limit
+of 10 per search, 0.63 % went to sybils, and all 918 searchers reached 90 % of the service's
+providers, with a mean t90 of 132 s. Limits of 1 and 2 per search also stop this attack, with
+0.07 % and 0.13 %, but slow honest searches, to a mean t90 of 273 s and 175 s, against 124 s with
+10. The result comes from one run. The attacker's allowance grows by 10 with each further /24.
+
+The advertise table allows only one registrar per /24 in a bucket because a place in it holds an
+advertisement for a whole lifetime, while a place in a search bucket costs one query. The
+[eclipse results](#why-filter-and-mix-lookup-results) for `SearchMixRegistrars` were measured with
+both limits in force.
+
+### Protocol Limits
+
+`ENRsPerPacket` is 3 because it is the most that always fits. A packet holds at most 1,280 bytes
+and an ENR up to 300. Four ENRs take 1,200 bytes, which leaves 80 for a header and
+authentication tag of at least 87 bytes.
+
+`RegRespLimit` is 8 and `QueryRespLimit` is 16, so that a responder sending one ENR per packet
+still delivers `RegAuxAccept` auxiliary ENRs or `F_return` advertisements. The caps keep a responder from holding a request open by announcing a large
+`total`. Since the timer restarts on each packet, they bound a request to about 5.6 s and 11.2 s.
+`MaxTopicDistances` is 256 because a request has one entry per log-distance. `MaxTopicNodes` is
+16, the per-response limit of the discv5 NODES message.
+
+`RespTimeout` is 700 ms, the timeout of the Go implementation's other discv5 requests. A timeout counts
+against the node, so a shorter value would penalise slow but working registrars. No measurement
+supports this value for TopDisc. `MinUDPPort` is 1024: discovery nodes do not use privileged ports,
+and dropping such records keeps a response from directing a node's packets at system services.
+
+### Ticket Bounds
+
+Only the issuing registrar verifies a ticket, so its authentication is local. HMAC-SHA256 is one
+example, and interoperability does not depend on it.
+
+`TicketKeyUses` is 100,000. It limits how many outstanding tickets a single exposed key can
+affect; it is not a limit of the MAC. `TicketKeyLifetime` is 6 h from the key's last use, 16 times
+`RegAttemptBudget`, so a retired key is still present for any ticket an advertiser keeps waiting
+on. A ticket with a quote longer than the key lifetime can lose its credit. This is deliberate: an
+advertiser abandons a registrar at `RegAttemptBudget`, so a quote of hours serves no honest
+advertiser.
+
+`UsedTicketLimit` is 16,384. A ticket can be replayed only within `UsedTicketTTL`, 15 s after it
+is credited, so the limit covers about 1,090 credited tickets per second, against about 5.6
+admissions per second for a full cache of 5,000 at `E = 15 min`. The MACs and expiry times take about 0.7 MB. Only
+a flood of credited tickets reaches the limit, and the oldest entries, those of the flood, are
+dropped first.
+
 
 ## TopDisc Security Considerations
 
