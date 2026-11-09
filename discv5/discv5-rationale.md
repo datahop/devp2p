@@ -1173,9 +1173,16 @@ how many entries a single registrar can place in one bucket.
 
 ### Eclipse Risk and `F_return`
 
-A large `F_return` raises the eclipse risk. In a 30,000-node simulation with 10 % sybil
-nodes, an `F_return` of 16 eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of
-6.
+A large `F_return` raises the eclipse risk when one registrar can fill a caller's first results.
+In a 30,000-node simulation with 10 % sybil nodes and no result mixing, an `F_return` of 16
+eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of 6.
+
+`F_return` is 16, the same limit discv5 applies to a FINDNODE result, so a TOPICNODES answer is
+no larger than an ordinary NODES answer. With [mixing](#why-filter-and-mix-lookup-results) the
+value is safe, and it balances eclipse resistance against search speed. With results mixed across
+`SearchMixRegistrars` registrars and all IP limits applied, 0.02 % of searches received only sybils
+in their first 16 results. In a 30,000-node simulation of one large service, an `F_return` of 6
+raised t90 from 348 s to 1,006 s and lowered recall from 100 % to 97.9 %.
 
 # References
 
