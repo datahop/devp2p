@@ -43,8 +43,8 @@ packets smaller than this size.
 
 Since low-latency communication is expected, implementations should place short timeouts
 on request/response interactions. Good timeout values are 500ms for a single
-request/response and 1s for the handshake. TopDisc requests use `RespTimeout`; see the
-[theory section on parameters].
+request/response and 1s for the handshake. TopDisc requests use a timeout of 700 ms for each response
+packet.
 
 When responding to a request, the response should be sent to the UDP envelope address of
 the request.
@@ -388,7 +388,7 @@ NODES messages carrying auxiliary ENRs) the recipient will send for this request
 REGTOPIC, responses may arrive in any order and the first `total` received applies.
 Implementations may place a limit on the allowed maximum for `total`; if exceeded,
 additional responses may be ignored. Implementations may also limit list lengths and the
-number of ENRs per response; see the [theory section on parameters] for the defaults.
+number of ENRs per response; see the [theory section on response limits] for the defaults.
 
 The recipient MUST NOT return expired advertisements from its ad cache and MUST NOT return
 more than `F_return` advertisements for one query. When the ad cache contains more than
@@ -410,9 +410,9 @@ A collection of test vectors for this specification can be found at
 [theory section on the waiting-time function]: ./discv5-theory.md#waiting-time-function
 [theory section on lookup responses]: ./discv5-theory.md#lookup-responses
 [theory section on the lookup procedure]: ./discv5-theory.md#lookup-procedure
-[theory section on parameters]: ./discv5-theory.md#parameters
 [theory section on auxiliary ENRs]: ./discv5-theory.md#auxiliary-enr-selection
 [theory section on service tables]: ./discv5-theory.md#service-tables
 [public]: ./discv5-theory.md#public-addresses
 [EIP-778]: ../enr.md
+[theory section on response limits]: ./discv5-theory.md#response-splitting
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md
