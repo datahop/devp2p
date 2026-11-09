@@ -9,7 +9,8 @@ service tables, registrations, and lookups.
     entry-key   = "td"
     entry-value = version
 
-Where `version` is an unsigned integer identifying the supported TopDisc protocol version.
+Where `version` is an RLP-encoded unsigned integer in canonical form, not a list, identifying
+the supported TopDisc protocol version.
 A node implementing the version described in the TopDisc document sets:
 
     td = 1
@@ -27,7 +28,7 @@ membership is established through TopDisc registrations and observed at runtime;
 entry only signals capability and protocol version compatibility.
 
 Future, non-backwards-compatible revisions of the topic discovery capability MUST bump the
-`version` value. Implementations that encounter an unknown version SHOULD treat the node
+`version` value. Implementations that encounter an unknown version MUST treat the node
 as if it did not publish the entry at all. Implementations MAY support multiple versions
 simultaneously; the matching rule between local and remote versions is defined by local
 policy.

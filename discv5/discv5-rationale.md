@@ -552,7 +552,7 @@ popularity and the current distribution of advertisements.
 
 The [TopDisc lookup procedure] records the advertisement yield of each registrar query, defined as
 the number of valid, de-duplicated advertisement records in the registrar's response.
-Each yield sample is associated with the service-distance bucket containing
+Each yield sample is associated with the search bucket containing
 the queried registrar.
 
 The sample counts the records as the registrar sent them, before the discoverer's own
@@ -599,7 +599,8 @@ service, floors of 2 and 4 settled where a response carries about four advertise
 registrar received about 2,000 queries, against about 150,000 with no floor. `SearchYieldFloor`
 is 8, the lowest of these values that keeps the speed of a search with no floor.
 
-A yield sample from a fallback bucket moves the active bucket only in the direction that
+A yield sample from a fallback bucket more than `SearchAuxRadius` from the active bucket moves
+it only in the direction that
 advertisement density does not already predict. Low yield farther out than the active bucket,
 or sufficient yield closer in, is expected and says nothing about the active bucket. Sufficient
 yield farther out shows that the search can move out, and low yield closer in shows that it
@@ -620,7 +621,7 @@ known registrar has been asked. The failed set keeps a dead node from the routin
 being picked again in every pass. A bucket whose queries all failed gets one retry pass, so
 that a single dead registrar cannot hold the search at one distance.
 
-When a lookup that started at the closest bucket sees no advertisements, the service may have
+When a lookup that started at the closest bucket sees no usable advertisement, the service may have
 had no advertisers when the lookup reached that bucket. Starting again at the farthest bucket
 lets the lookup find advertisers that appear later.
 
@@ -647,7 +648,7 @@ Without mixing, a pass would deliver the first registrar's whole response before
 registrar's results. A caller that stops after its first few results would then depend on a
 single registrar, which a malicious registrar could fill with sybil advertisements. Mixing
 holds results until several registrars have answered, a short wait has passed, or the pass ends, and
-then delivers them one registrar at a time. In simulation (datahop/go-ethereum#140), mixing
+then delivers them one registrar at a time. In simulation, mixing
 cut the share of searches whose first results were all sybils from 21 % to 0.15 %. Mixing
 does not remove the eclipse risk of a large `F_return`; see
 [Eclipse Risk and `F_return`](#eclipse-risk-and-f_return).
@@ -767,10 +768,10 @@ it does not like, the advertiser sees a timeout: it holds the registrar in its f
 an advertisement lifetime and counts a liveness failure against it in its node table. The
 registrar is penalised as if it had failed, and the advertiser loses a working registrar.
 
-In a 25,000-node AWS run with churn and unreachable ("ghost") nodes, registrars answered
-nothing to a ticket outside its window. TopDisc searchers found a median of 35.7 % of their
-topic's providers, against 72.3 % with plain discv5. The REGTOPIC traces of that run
-(datahop/go-ethereum#152) show that 96 % of the ticket retries arrived after the 5 s window and
+In a 25,000-node run with churn and unreachable ("ghost") nodes, with registrars that answer
+nothing to a ticket outside its window, TopDisc searchers found a median of 35.7 % of their
+topic's providers, against 72.3 % with plain discv5. The REGTOPIC traces of that run show
+that 96 % of the ticket retries arrived after the 5 s window and
 were dropped without an answer; these made up 76 % of all REGTOPIC timeouts. The [tickets]
 rules therefore answer every request: a rejection with an explicit empty response, an early
 ticket with the remaining wait, a late ticket within the grace `ε` with the wait it was
@@ -789,7 +790,7 @@ ticket is returned unchanged rather than re-issued: a re-issued ticket would be 
 ticket for the same window, which the memory of credited tickets would not recognise. It also
 keeps an early retry from learning the current waiting time.
 
-A registrar admits any advertisement whose remaining wait is below `W_min`, so it has no
+A registrar admits any advertisement whose remaining wait is at most `W_min`, so it has no
 reason to quote less. An honest registrar can still send a shorter wait: a full cache quotes the
 time until its next expiry, and an early ticket comes back with whatever remains of its wait.
 Dropping a registrar for such a quote would penalise correct behaviour, so the advertiser
@@ -800,10 +801,9 @@ scheduling keeps it from delaying the other buckets, and the clamped waits add u
 
 ## Why Schedule Registrations Per Bucket?
 
-A ticket retry is useful only inside its window. Before the change described above, each
-advertised topic sent all its REGTOPIC requests through one sender. A due ticket retry then
-waited behind every first contact ahead of it, each of which could take a 700 ms timeout when
-the registrar was dead, and arrived after its window. Several concurrent senders keep one
+A ticket retry is useful only inside its window. With a single sender per advertised topic, a
+due ticket retry waits behind every first contact ahead of it, each of which can take a 700 ms
+timeout when the registrar is dead, and misses its window. Several concurrent senders keep one
 unresponsive registrar from holding back the rest.
 
 Serving buckets in turn keeps a bucket with many new candidates from delaying the retries of
@@ -866,7 +866,7 @@ increases.
 ## Why Change the Waiting-Time Function?
 
 The [waiting-time function] differs from the form in [DISC-NG], which multiplies
-`E / (1 - c/C)^Pocc` by `c(s)/c + score + G` for a small safety constant `G = 10^-7`.
+`E / (1 - c/C)^Pocc` by `c(ad.service)/c + score(ad.IP) + G` for a small safety constant `G = 10^-7`.
 
 The safety constant `G` is kept, as an additive term multiplied by the occupancy factor. It
 adds less than `W_min` while the cache is less than about 69 % full, so at light load the
@@ -877,7 +877,7 @@ which keeps its last places free and is the flow control [DISC-NG] intends; see
 [Admission Near Full Occupancy](#admission-near-full-occupancy). The safety term is not
 lower-bounded: it falls with occupancy, while the service and IP components keep their bounds.
 
-Using `max(c(s)/c + score, 10^-6)` instead of an additive `G` would charge a new service from
+Using `max(c(ad.service)/c + score(ad.IP), 10^-6)` instead of an additive `G` would charge a new service from
 a diverse address almost nothing at any occupancy.
 
 The service term divides by `c + 1` instead of `c`, which defines it for an empty cache
@@ -887,8 +887,8 @@ cache charges at most `E / 10` for a fully similar advertisement.
 The occupancy factor makes the waiting time grow very fast as the cache fills: about
 `3 * 10^10` seconds at 86 % occupancy. Converted to a 64-bit nanosecond duration, such a value
 is out of range, and an overflowing conversion can turn a long wait into an immediate
-admission: a cache about 86 % full or more would then admit every request
-(datahop/go-ethereum#154). The waiting time is therefore capped at `maxWaitTime` before the
+admission: a cache about 86 % full or more would then admit every request. The waiting time
+is therefore capped at `maxWaitTime` before the
 conversion. The cap is far above `RegAttemptBudget`, so a capped quote still makes the
 advertiser move to another registrar, on every platform. For the same reason, advertisers
 saturate a `wait-time` that does not fit their duration type.
@@ -914,14 +914,14 @@ advertisements in the ad cache and prefixes represented in the IP similarity tre
 A service table is initially derived from the ordinary node table. However, the ordinary
 node table is centred on the local node ID, not on the topic identifier. It may therefore
 contain few nodes in buckets that are important for a particular topic. TopDisc responses
-can include auxiliary ENRs selected from the responder's view of the topic-centred key
-space. Advertisers and discoverers can use these ENRs to refine their local service
+can include auxiliary ENRs selected from the registrar's ordinary node table by distance to
+the topic. Advertisers and discoverers can use these ENRs to refine their local service
 tables. Returned ENRs are auxiliary routing information, not lookup results.
 Implementations must validate them and check TopDisc capability in the ENR before
 inserting them into service tables.
 
 When a request includes topic-distances for which the requester needs additional
-candidates, the responder returns at most one auxiliary ENR for each requested distance.
+candidates, the registrar returns at most one auxiliary ENR for each requested distance.
 This keeps responses compact and limits the amount of routing information contributed
 for any one requested distance.
 
@@ -950,9 +950,10 @@ handle TopDisc messages.
 
 ## Why These Parameter Values?
 
-The [parameters](./discv5-theory.md#parameters) are defaults. Where a measurement or a bound
-supports a value, this section gives it. Where none does, the section says so, and the value is
-a working default rather than an optimum.
+The [parameters](./discv5-theory.md#parameters) marked Local policy are defaults, and those
+marked MUST are fixed by the protocol. Where a measurement or a bound supports a value, this
+section gives it. Where none does, the section says so, and the value is a working default
+rather than an optimum.
 
 ### Advertisement Lifetime
 
@@ -968,6 +969,23 @@ renewal traffic.
 An [earlier evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7f2324/doc/report_m4/reports/ad_lifetime.md)
 preferred a short lifetime because the network then stays easier for new nodes to register in,
 spreads discovered nodes better, and resists sybil and denial-of-service attacks better.
+
+### Ad Cache and Waiting Times
+
+`C` is 5,000 by default. No measurement in this document compares values.
+
+`Pocc` is 10 and `Wbase` is 0.1. `Wbase` makes an empty cache charge at most `E / 10` for a fully
+similar advertisement. With these values the safety term reaches `E` at about 84 % occupancy and
+`RegAttemptBudget` at about 85 %. No measurement supports these two values.
+
+`G` is the value from the [DISC-NG] paper, and no measurement in this document compares values.
+
+`W_min` is 1 s: a remaining wait below it is too short to be worth another round trip. No
+measurement supports this value.
+
+`δ` is 5 s and `ε` is 10 s. `ε` credits a retry that misses the window by a few seconds and is
+short against `E`, so a ticket cannot be redeemed long after it was earned. No measurement
+compares other values of either.
 
 ### Advertise Table
 
@@ -1017,8 +1035,8 @@ supports these four values.
 ### Search Table and Pacing
 
 `SearchTableDepth` is 18, the same as the advertise table, so that a bucket covers the same part
-of the key space in both. `SearchBucketSize` is 8, which keeps one search to at most 144 candidate
-registrars. Results are not sensitive to the shape of this table: in a 30,000-node simulation with
+of the key space in both. `SearchBucketSize` is 8, which keeps at most 144 candidates held at
+once. Results are not sensitive to the shape of this table: in a 30,000-node simulation with
 a yield floor of 4, 32 nodes per bucket instead of 16 and 14 buckets instead of 10 changed
 discovery time, total queries and the load on the busiest registrar by about 2 % or less. Eight
 has not been compared with larger values at the current parameters.
@@ -1030,13 +1048,15 @@ supports these two values.
 
 `SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at most
 `ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is 8: in
-the simulation above, 16 auxiliary ENRs per response made no measurable difference.
+the 30,000-node table-shape simulation with a yield floor of 4, 16 auxiliary ENRs per response
+made no measurable difference. `RegAuxAccept` equals `AuxENRLimit`. `QueryAuxAccept` is 16. No
+measurement supports this value.
 
 `SearchPassGap` is 2 s, the shortest spacing of passes, and only passes that find something new
 stay at that spacing. `SearchPassQueries` bounds one pass. `SearchMixWait` bounds how long a
 result can wait when too few registrars have answered. A search that reaches `SearchFilterSize`
 forgets its oldest entries and may receive those advertisers again. No measurement supports these
-four values.
+four values. `SearchUnreadLimit` equals `F_return`, one full response.
 
 ### Search IP Limits
 
@@ -1064,13 +1084,13 @@ both limits in force.
 and an ENR up to 300. Four ENRs take 1,200 bytes, which leaves 80 for a header and
 authentication tag of at least 87 bytes.
 
-`RegRespLimit` is 8 and `QueryRespLimit` is 16, so that a responder sending one ENR per packet
-still delivers `RegAuxAccept` auxiliary ENRs or `F_return` advertisements. The caps keep a responder from holding a request open by announcing a large
-`total`. Since the timer restarts on each packet, they bound a request to about 5.6 s and 11.2 s.
-`MaxTopicDistances` is 256 because a request has one entry per log-distance. `MaxTopicNodes` is
-16, the per-response limit of the discv5 NODES message.
+`RegRespLimit` is 8 and `QueryRespLimit` is 16. `total` includes the REGCONFIRMATION, so
+`RegRespLimit` leaves seven NODES packets, and in a TOPICQUERY the NODES and TOPICNODES packets
+share the 16. The caps keep a registrar from holding a request open by announcing a large
+`total`. `MaxTopicDistances` is 256 because a request has one entry per log-distance.
+`MaxTopicNodes` is 16, the FINDNODE result limit and `F_return`.
 
-`RespTimeout` is 700 ms, the timeout of the Go implementation's other discv5 requests. A timeout counts
+`RespTimeout` is 700 ms, the timeout of other discv5 requests. A timeout counts
 against the node, so a shorter value would penalise slow but working registrars. No measurement
 supports this value for TopDisc. `MinUDPPort` is 1024: discovery nodes do not use privileged ports,
 and dropping such records keeps a response from directing a node's packets at system services.
@@ -1081,7 +1101,8 @@ Only the issuing registrar verifies a ticket, so its authentication is local. HM
 example, and interoperability does not depend on it.
 
 `TicketKeyUses` is 100,000. It limits how many outstanding tickets a single exposed key can
-affect; it is not a limit of the MAC. `TicketKeyLifetime` is 6 h from the key's last use, 16 times
+affect; it is not a limit of the MAC. No measurement supports this value. `TicketKeyLifetime` is
+6 h from the key's last use, 16 times
 `RegAttemptBudget`, so a retired key is still present for any ticket an advertiser keeps waiting
 on. A ticket with a quote longer than the key lifetime can lose its credit. This is deliberate: an
 advertiser abandons a registrar at `RegAttemptBudget`, so a quote of hours serves no honest
@@ -1100,8 +1121,8 @@ The following security considerations apply to TopDisc.
 
 ### Ticket Transfer
 
-The [ticket mechanism] binds a ticket to the topic and the advertiser's node ID
-(datahop/go-ethereum#160). A ticket handed to another node is not credited, so tickets cannot
+The [ticket mechanism] binds a ticket to the topic and the advertiser's node ID. A ticket handed
+to another node is not credited, so tickets cannot
 be moved between identities, and a ticket issued for one topic cannot be used for another. A
 ticket is not bound to the advertised ENR: a node that changes its record during an attempt,
 under the same node ID, keeps its ticket and the waiting time it has credited. The required
