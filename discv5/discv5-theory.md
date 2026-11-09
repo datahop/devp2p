@@ -306,7 +306,8 @@ In this document *service* and *topic* name the same thing: the `topic` field of
 carries the service identifier `s`. A node answering a [REGTOPIC] or [TOPICQUERY] request is a
 **registrar**; the wire specification also calls it the recipient of the request. A
 **topic-distance** is the logarithmic distance `logdistance(s, n)` from the service identifier to
-a node ID.
+a node ID. A **response packet** is one message sent in answer to a request, and the **reply** to a
+request is all the response packets that answer it.
 
 ## Co-existence with Node Discovery
 
@@ -395,8 +396,9 @@ address it contains.
 
 A node's **endpoint address** is the more global of the IPv4 and IPv6 addresses in its ENR, in the
 order unspecified, loopback, link-local, private, any other address. If both are equally global
-it is the IPv4 address. The node's UDP port is the `udp` value for an IPv4 endpoint address, and
-the `udp6` value, or `udp` if there is none, for an IPv6 endpoint address.
+it is the IPv4 address. Multicast addresses are ignored when choosing the endpoint address. The
+node's UDP port is the `udp` value for an IPv4 endpoint address, and the `udp6` value, or `udp` if
+there is none, for an IPv6 endpoint address.
 
 The **relay rule** decides whether the endpoint address `a` of a node may be passed between
 peers. With respect to a peer address `p`, the address `a` is rejected if:
@@ -430,8 +432,9 @@ The nodes at topic-distance `d` form the set:
 
 Advertise and search tables group these sets into 18 buckets, indexed from `0`, the farthest, to
 `17`, the closest. Bucket `i < 17` holds `D_(256-i)(s)` and bucket `17` holds every distance `239`
-and below. A request names bucket `i < 17` by the topic-distance `256 - i`, and bucket `17` by the
-topic-distance `239`.
+and below. A request names bucket `i < 17` by the topic-distance `256 - i`, and the closest bucket
+by the largest distance that bucket holds, `257 - depth` for a table of `depth` buckets, so `239`
+here.
 
 Thus, `B(s)` gives the local node a service-centred view of the discovery network. Buckets closer
 to `s` contain nodes whose IDs are closer to the service identifier, while buckets farther from
@@ -539,8 +542,8 @@ extension correctly.
 
 Implementations should therefore maintain TopDisc-level usability state for nodes in `B(s)`.
 
-If a node in `B(s)` times out, returns a malformed response, or rejects a registration request,
-implementations remove it from `B(s)` after that first failure and keep it out for `E` through the
+If a node in `B(s)` times out or rejects a registration request, implementations remove it from
+`B(s)` after that first failure and keep it out for `E` through the
 failed set of the operation (see [Registration Procedure](#registration-procedure) and
 [Registrar Selection](#registrar-selection)). A partial lookup response is not a failure.
 
@@ -548,9 +551,10 @@ Temporary exclusion is not a permanent blacklist. After `E`, the node may be ins
 again when the ordinary node table or an auxiliary ENR offers it, if its ENR is valid and
 advertises a supported TopDisc version. No liveness check or node-table membership is required.
 
-A timeout of a [REGTOPIC] or [TOPICQUERY] request counts as one liveness failure of that node
-towards the ordinary node table. A request that the node answers, even with a rejection or a
-partial response, clears the consecutive failures counted so far. No other TopDisc failure counts.
+A timeout of a [REGTOPIC] before the [REGCONFIRMATION] arrives, or of a [TOPICQUERY] before any
+record that passes validation has arrived, counts as one liveness failure of that node towards the
+ordinary node table. A request that the node answers, even with a rejection or a partial response,
+clears the consecutive failures counted so far. No other TopDisc failure counts.
 Retention in the ordinary node table otherwise follows Discovery v5 liveness and table-maintenance
 rules.
 
@@ -627,7 +631,9 @@ Before computing a waiting time, the registrar checks the advertised ENR. It MUS
 request if the ENR is invalid, if its node ID is not the sender's, if it holds no IP address of the
 packet's address family, if that IP address differs from the packet's source IP address, or if it
 holds an IP address of the other family that is not
-[publicly routable](#address-classes-and-relaying) (see [REGTOPIC]). Only IP addresses are
+[publicly routable](#address-classes-and-relaying) (see [REGTOPIC]). The ENR key (`ip` or `ip6`)
+decides an address's family for these checks; the mapping of IPv4-mapped addresses applies only to
+classification and to comparison with the source address. Only IP addresses are
 compared: the UDP port is ignored. A rejection is answered with a [REGCONFIRMATION] carrying no
 ticket and a waiting time of `0`, and no auxiliary ENRs.
 
@@ -743,9 +749,10 @@ according to when it is presented:
   registration attempt (`waited = 0`, `tinit = now`).
 
 A ticket is credited once while the registrar remembers it. A registrar remembers each ticket it
-credits, on time or late, nominally for `δ + ε` from the time of crediting, which covers the rest
-of the span in which the ticket could be credited. While it remembers a ticket, it treats any
-later presentation of that ticket as a new registration attempt, and still answers it. The memory
+credits, on time or late, nominally for `UsedTicketTTL = δ + ε` from the time of crediting, which
+covers the rest of the span in which the ticket could be credited. While it remembers a ticket,
+it treats any later presentation of that ticket as a new registration attempt, and still answers
+it. The memory
 is bounded: by default a registrar remembers up to `UsedTicketLimit = 16,384` credited tickets
 and drops the oldest entry when full, even before its `δ + ε` has passed. Replay
 protection therefore holds only while a ticket's entry is retained: a ticket whose entry was
@@ -921,8 +928,8 @@ the computed component and the bound's remaining value. The bound is dropped whe
 advertisement for `s` leaves the cache, so a request for a service with no advertisements in the
 cache is charged only the computed component.
 
-For IP addresses, lower-bound state is maintained at the IP-tree vertex corresponding to the longest
-prefix match already present in the tree, without introducing new vertices only for pending
+For IP addresses, lower-bound state is maintained at the IP-tree vertex for the longest existing
+prefix among the `D` prefix lengths considered, without introducing new vertices only for pending
 requests. The charged IP component is the larger of the computed component and the largest
 remaining bound on any vertex along the address's path; reading the whole path keeps a bound
 effective after later insertions create deeper vertices. If the advertisement has both an IPv4 and
@@ -963,7 +970,7 @@ A candidate is not added to a bucket if:
    prefix length for both families. LAN addresses are exempt. A registrar holds its prefix slot
    until it is removed from the bucket; or
 5. the candidate is an auxiliary ENR, and the registrar that returned it has already contributed a
-   candidate to that bucket, in this or an earlier response.
+   candidate to that bucket, in this or an earlier reply.
 
 A candidate already in the bucket whose ENR has a higher sequence number than the stored one
 replaces the stored record, unless a request to that registrar is in flight. The `/24` limit is
@@ -1013,23 +1020,24 @@ the advertisement by then is overloaded or malfunctioning. An abandoned attempt 
 registrar in the failed set. The advertiser removes the registrar from the bucket, fills the slot
 from the standby candidates, and adds the registrar to its **overloaded set** for `s`. Like the
 failed set, the overloaded set keeps a registrar out of the advertise table, from any source, for
-`E` from the time it was first added.
+`OverloadedTTL = E` from the time it was first added.
 
 The advertiser MUST treat a quoted waiting time below `W_min` as `W_min`: it waits at least `W_min`
 before retrying and keeps the registrar. The clamped value counts toward `RegAttemptBudget`. A
 quoted value too large for the advertiser's duration type is saturated, and so exceeds the budget.
 The lifetime in an admission is capped at `E`.
 
-A registration attempt fails if the request times out before the [REGCONFIRMATION] arrives, the
-registrar rejects the request, or it returns a malformed response. A timeout after the
+A registration attempt fails if the request times out before the [REGCONFIRMATION] arrives or the
+registrar rejects the request. An undecodable packet is ignored, so it ends as a timeout; an invalid
+ENR is dropped per record and does not fail the attempt. A timeout after the
 [REGCONFIRMATION] does not fail the attempt: only auxiliary ENRs are missing, so the advertiser keeps
 the confirmation and the ENRs received. On failure, the advertiser removes
 the registrar from the bucket, fills the slot from the standby candidates, and adds the registrar to
 its **failed set** for `s`, by node ID. A registrar in the failed set is not added to the
-advertise table again, from any source, for `E` from the time it was first added.
+advertise table again, from any source, for `AskedFailedTTL = E` from the time it was first added.
 
-Only a timeout counts as a liveness failure of the registrar towards the ordinary node table. A
-rejection is an answer: it shows that the registrar is reachable.
+Only a timeout before the [REGCONFIRMATION] counts as a liveness failure of the registrar towards
+the ordinary node table. A rejection is an answer: it shows that the registrar is reachable.
 
 When registration succeeds, the advertisement remains stored by the registrar until it expires,
 unless it is removed earlier by registrar policy. The advertiser takes the lifetime from the
@@ -1094,7 +1102,8 @@ Within a bucket, the discoverer SHOULD select the registrar pseudo-randomly, so 
 discoverers of the same service do not converge on the same registrars.
 
 The discoverer keeps two sets of registrars across the passes of a lookup. Each set holds a
-registrar for `E` from the time it was first added; adding it again does not extend that time.
+registrar for `AskedFailedTTL = E` from the time it was first added; adding it again does not
+extend that time.
 
 - The **asked set** holds registrars that answered a query. A registrar in the asked set is
   not an unqueried candidate in later passes.
@@ -1102,9 +1111,9 @@ registrar for `E` from the time it was first added; adding it again does not ext
   not inserted into the search table, from any source, until it leaves the set.
 
 A query fails when the registrar is unreachable, times out, or its response ends in an error
-before any record (advertisement or auxiliary ENR) has arrived. A failed registrar is removed
-from the search table. A response that ends in an error after some records have arrived is a
-partial response; the registrar counts as having answered.
+before any record (advertisement or auxiliary ENR) that passes validation has arrived. A failed
+registrar is removed from the search table. A response that ends in an error after some records
+have arrived is a partial response; the registrar counts as having answered.
 
 A registrar in the asked set that is offered to the search table again, from the node table
 or as an auxiliary ENR, becomes a spare. When no search bucket holds an unqueried candidate,
@@ -1124,20 +1133,20 @@ applies to the node's endpoint address; LAN addresses and nodes without an addre
 
 #### Advertisement Yield
 
-A response is complete when the requester has received `total` packets, capped as in
-[Response Splitting](#response-splitting), without an error. For each complete response, the
+A reply is complete when the requester has received `total` packets, capped as in
+[Response Splitting](#response-splitting), without an error. For each complete reply, the
 discoverer records one advertisement-yield sample for the
 responding registrar's bucket. The sample is the number of advertisement records in the
 [TOPICNODES] responses after per-record validation, the `F_return` size limit and
 de-duplication by node ID within the response, and before the `td` capability check and the
-result filter described below. A complete response containing no advertisements contributes
+result filter described below. A complete reply containing no advertisements contributes
 a yield sample of `0`.
 
 A partial response contributes a yield sample only if its count reaches `F` on its own. Its
 count is a lower bound: it can show that yield is sufficient, but not that it is low. A failed
 query contributes no yield sample.
 
-During a search pass, each bucket retains its `SearchYieldWindow = 4` most recent yield samples. A response does not change the active bucket until the responding bucket has at least `SearchMinSamples = 2` samples. Let `samples` be those samples sorted in ascending order, and `m` their count, where `2 <= m <= 4`. With zero-based indexing and integer division:
+During a search pass, each bucket retains its `SearchYieldWindow = 4` most recent yield samples. A response does not change the active bucket until the responding bucket has at least `SearchMinSamples = 2` samples. Let `samples` be those samples sorted in ascending order, and `m` their count, where `SearchMinSamples <= m <= SearchYieldWindow`. With zero-based indexing and integer division:
 
     lower = samples[(m - 1) / 2]
     upper = samples[m / 2]
@@ -1154,10 +1163,10 @@ the candidate bucket `next` as follows:
     else if upper >= F:
         next = b
     else if upper == 0:
-        next = min(last, b + 4)
+        next = min(last, b + SearchMaxJump)
     else:
         jump = ceil(log2(F / upper))
-        next = min(last, b + min(jump, 4))
+        next = min(last, b + min(jump, SearchMaxJump))
 
 The division in `F / upper` is real division. If the recent yield samples are consistently full (`lower >= F_return`), the search moves one
 bucket farther from `s`. If the observed yield is sufficient but not consistently full
@@ -1186,7 +1195,8 @@ A pass ends when no query is in flight, no released result waits to be read by t
 one of the following holds:
 
 1. `SearchPassQueries = 32` queries of the pass have completed, answered or failed;
-2. the active bucket has no unqueried candidate and holds at least two yield samples; or
+2. the active bucket has no unqueried candidate and holds at least `SearchMinSamples` yield samples;
+   or
 3. no search bucket holds an unqueried candidate and no spare can be re-asked.
 
 The next pass starts at the first of these that applies:
@@ -1226,7 +1236,8 @@ registrar's address, and any configured network restrictions. Its UDP port must 
 advertisement whose node ID was already returned by an earlier advertisement of the same query,
 in the same or another [TOPICNODES] packet, is dropped; this de-duplication is separate from that
 of the auxiliary ENRs. The discoverer then discards the advertisements whose ENR does not
-advertise a supported `td` version, and extracts the advertised ENRs.
+advertise a supported `td` version, drops an advertisement of the discoverer itself, and extracts
+the advertised ENRs.
 Advertisements are candidate results for the target service. The caller may
 stop lookup when it has collected enough distinct advertisers for its local or service-specific
 purpose. This target is denoted `F_lookup` in this document and is determined by the application
@@ -1326,9 +1337,9 @@ place; a registrar whose query failed releases its slot. In the advertise table,
 holds its prefix slot until it is removed from the bucket.
 
 A discoverer MAY cap the auxiliary ENRs it accepts per lookup request; the default is
-`QueryAuxAccept = 16`. When processing auxiliary ENRs from a single response, at most one candidate
+`QueryAuxAccept = 16`. When processing auxiliary ENRs from a single reply, at most one candidate
 is admitted into any given search bucket. This limits the contribution of a single responding
-registrar to that bucket within one response.
+registrar to that bucket within one reply.
 
 A successful ordinary Discovery v5 liveness check is not required before insertion. If the node
 subsequently fails to respond to a TopDisc request, it may be removed or temporarily excluded
@@ -1346,7 +1357,7 @@ This section lists the TopDisc parameters. The status column gives the rule that
 
 | Parameter             | Meaning                                                                       | Value                   | Status                  | Rationale                     |
 |-----------------------|-------------------------------------------------------------------------------|-------------------------|-------------------------|-------------------------------|
-| `E`                   | Advertisement lifetime; also the lifetime of the asked and failed sets        | `15 min`                | MUST                    | [Values][r-values]            |
+| `E`                   | Advertisement lifetime                                                        | `15 min`                | MUST                    | [Values][r-values]            |
 | `C`                   | Registrar ad cache capacity, a hard limit                                     | `1,000`                 | Local policy            | [Values][r-values]            |
 | `δ`                   | Registration window after a ticket's waiting time                             | `5 sec`                 | MUST                    | [Values][r-values]            |
 | `ε`                   | Late grace after the window in which a ticket is still credited               | `10 sec`                | Local policy            | [Answers][r-answer]           |
@@ -1366,12 +1377,12 @@ This section lists the TopDisc parameters. The status column gives the rule that
 | `SearchBucketPrefix`  | Prefix length and registrars allowed per prefix in a search bucket            | `/24`, `2` per bucket   | Local policy            | [Values][r-values]            |
 | `SearchSubnetLimit`   | Distinct registrars queried per `/24` in a lookup, each counted for `E`       | `10`                    | Local policy            | [Values][r-values]            |
 | `SearchYieldFloor`    | Yield threshold for staying at the responding bucket instead of moving closer | `8`                     | Local policy            | [Adaptive search][r-adaptive] |
-| `SearchAuxRadius`     | Neighbourhood around the active bucket for auxiliary registrar requests       | `1`                     | Local policy            | [Aux ENRs][r-aux]             |
+| `SearchAuxRadius`     | Range around active bucket for aux requests and fallback replies moving it    | `1`                     | Local policy            | [Aux ENRs][r-aux]             |
 | `SearchPassQueries`   | Maximum number of queries in one search pass                                  | `32`                    | Local policy            | [Passes][r-passes]            |
 | `SearchPassGap`       | Minimum spacing between the starts of consecutive search passes               | `2 sec`                 | SHOULD                  | [Passes][r-passes]            |
 | `SearchPassBackoff`   | Maximum spacing between search passes after idle passes                       | `60 sec`                | SHOULD                  | [Passes][r-passes]            |
 | `SearchMixRegistrars` | Release threshold: registrars that replied with results, checked per query    | `10`                    | SHOULD                  | [Filter and mix][r-filter]    |
-| `SearchMixWait`       | Release threshold: wait of the first queued result, checked per query         | `5 sec`                 | SHOULD                  | [Filter and mix][r-filter]    |
+| `SearchMixWait`       | Release threshold: wait of first queued result or of a lone registrar's queue | `5 sec`                 | SHOULD                  | [Filter and mix][r-filter]    |
 
 ### Implementation Defaults
 
@@ -1380,10 +1391,11 @@ These values bound local state, message sizes and timers.
 | Parameter             | Meaning                                                                       | Value                   | Status                  | Rationale                     |
 |-----------------------|-------------------------------------------------------------------------------|-------------------------|-------------------------|-------------------------------|
 | `OverloadedTTL`       | How long an over-budget registrar stays in the advertiser's overloaded set    | `E`                     | Local policy            | [Values][r-values]            |
+| `AskedFailedTTL`      | How long the asked and failed sets of an operation hold a registrar           | `E`                     | Local policy            | [Values][r-values]            |
 | `UsedTicketTTL`       | How long a credited ticket is nominally remembered, from crediting            | `δ + ε`                 | Local policy            | [Values][r-values]            |
 | `UsedTicketLimit`     | Remembered credited tickets; the oldest is dropped when full                  | `16,384`                | Local policy            | [Values][r-values]            |
-| `TicketKeyLifetime`   | Lifetime of a ticket MAC key after its last use                               | `6 h`                   | Local policy            | [Values][r-values]            |
-| `TicketKeyUses`       | Tickets sealed with one MAC key before a new key is made                      | `100,000`               | Local policy            | [Values][r-values]            |
+| `TicketKeyLifetime`   | If tickets use a rotating MAC key: lifetime of a key after its last use       | `6 h`                   | Local policy            | [Values][r-values]            |
+| `TicketKeyUses`       | If tickets use a rotating MAC key: tickets sealed with a key before a new one | `100,000`               | Local policy            | [Values][r-values]            |
 | `maxWaitTime`         | Cap on a computed waiting time and on recorded lower bounds                   | `24 h`                  | Local policy            | [Waiting time][r-wait]        |
 | `AuxENRLimit`         | Topic-distances served per request, so auxiliary ENRs returned per request    | `8`                     | Local policy            | [Values][r-values]            |
 | `RegAuxAccept`        | Auxiliary ENRs accepted per REGTOPIC request                                  | `8`                     | Local policy            | [Values][r-values]            |
@@ -1437,15 +1449,17 @@ announced `total` of a [REGTOPIC] at `RegRespLimit = 8` but keeps waiting for th
 until it arrives, the request fails or times out, or `RegRespLimit` packets of any type have
 arrived for the request, which fails the attempt if none was the [REGCONFIRMATION]. A discoverer
 stops after `QueryRespLimit` packets of any type and treats what arrived as a partial response if
-`total` was not reached. A discoverer waits for at most
+the capped `total` was not reached. A discoverer waits for at most
 `QueryRespLimit = 16` responses to a [TOPICQUERY], even if `total` is higher, and keeps at most
 `F_return` advertisements and `QueryAuxAccept` auxiliary ENRs from them. A registrar by default
-sends at most `ENRsPerPacket = 3` ENRs per [NODES] or [TOPICNODES] response.
+sends at most `ENRsPerPacket = 3` ENRs per [NODES] or [TOPICNODES] response. A registrar SHOULD
+send the [REGCONFIRMATION] first and SHOULD NOT announce a `total` above 8, the default
+`RegRespLimit`.
 
-Implementations may limit the length of the lists they decode. By default, a node does not decode
-a [REGTOPIC] or [TOPICQUERY] whose topic-distance list holds more than `MaxTopicDistances = 256`
-entries, and so does not answer it, nor a [TOPICNODES] holding more than `MaxTopicNodes = 16` ENRs.
-See [Parameters](#parameters).
+A node that limits the topic-distances it serves uses the earliest listed and ignores the rest, and
+still answers the request. A topic-distance list of more than `MaxTopicDistances = 256` entries is
+invalid and need not be answered. A node does not decode a [TOPICNODES] holding more than
+`MaxTopicNodes = 16` ENRs. See [Parameters](#parameters).
 
 ### Wire Encoding
 
