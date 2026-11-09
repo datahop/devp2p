@@ -1292,9 +1292,9 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `ε`                   | Late grace after the window in which a ticket is still credited               | `10 sec`                | Local policy            | [Answers][r-answer]           |
 | `W_min`               | Admission slack and minimum quote; shorter quotes are waited as `W_min`       | `1 sec`                 | SHOULD; advertiser MUST | [Answers][r-answer]           |
 | `UsedTicketTTL`       | How long a credited ticket is nominally remembered, from crediting            | `δ + ε`                 | Local policy            | [Answers][r-answer]           |
-| `UsedTicketLimit`     | Remembered credited tickets; the oldest is dropped when full                  | `16,384`                | Local policy            | [Answers][r-answer]           |
-| `TicketKeyLifetime`   | Lifetime of a ticket MAC key after its last use                               | `6 h`                   | Local policy            | —                             |
-| `TicketKeyUses`       | Tickets sealed with one MAC key before a new key is made                      | `100,000`               | Local policy            | —                             |
+| `UsedTicketLimit`     | Remembered credited tickets; the oldest is dropped when full                  | `16,384`                | Local policy            | [Values][r-values]            |
+| `TicketKeyLifetime`   | Lifetime of a ticket MAC key after its last use                               | `6 h`                   | Local policy            | [Values][r-values]            |
+| `TicketKeyUses`       | Tickets sealed with one MAC key before a new key is made                      | `100,000`               | Local policy            | [Values][r-values]            |
 | `Wbase`               | Base waiting-time factor, `base(0) = Wbase * E`                               | `0.1` (provisional)     | Local policy            | [Waiting time][r-wait]        |
 | `Pocc`                | Occupancy exponent in the waiting-time function                               | `10`                    | Local policy            | [Waiting time][r-wait]        |
 | `G`                   | Safety constant of the waiting-time function, not lower-bounded               | `10^-7`                 | Local policy            | [Waiting time][r-wait]        |

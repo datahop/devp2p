@@ -1076,6 +1076,25 @@ against the node, so a shorter value would penalise slow but working registrars.
 supports this value for TopDisc. `MinUDPPort` is 1024: discovery nodes do not use privileged ports,
 and dropping such records keeps a response from directing a node's packets at system services.
 
+### Ticket Bounds
+
+Only the issuing registrar verifies a ticket, so its authentication is local. HMAC-SHA256 is one
+example, and interoperability does not depend on it.
+
+`TicketKeyUses` is 100,000. It limits how many outstanding tickets a single exposed key can
+affect; it is not a limit of the MAC. `TicketKeyLifetime` is 6 h from the key's last use, 16 times
+`RegAttemptBudget`, so a retired key is still present for any ticket an advertiser keeps waiting
+on. A ticket with a quote longer than the key lifetime can lose its credit. This is deliberate: an
+advertiser abandons a registrar at `RegAttemptBudget`, so a quote of hours serves no honest
+advertiser.
+
+`UsedTicketLimit` is 16,384. A ticket can be replayed only within `UsedTicketTTL`, 15 s after it
+is credited, so the limit covers about 1,090 credited tickets per second, against about 5.6
+admissions per second for a full cache of 5,000 at `E = 15 min`. The MACs and expiry times take about 0.7 MB. Only
+a flood of credited tickets reaches the limit, and the oldest entries, those of the flood, are
+dropped first.
+
+
 ## TopDisc Security Considerations
 
 The following security considerations apply to TopDisc.
