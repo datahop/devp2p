@@ -1320,8 +1320,8 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 | `F_lookup`            | Caller/application-defined target number of distinct advertiser results       | Caller-defined          | Local policy            | —                             |
 | `SearchTableDepth`    | Number of search-table buckets                                                | `18`                    | Local policy            | [Values][r-values]            |
 | `SearchBucketSize`    | Maximum candidate capacity of one search bucket                               | `8`                     | Local policy            | [Values][r-values]            |
-| `SearchBucketPrefix`  | Prefix length and registrars allowed per prefix in a search bucket            | `/24`, `2` per bucket   | Local policy            | [Security][r-security]        |
-| `SearchSubnetLimit`   | Distinct registrars queried per `/24` in a lookup, each counted for `E`       | `10`                    | Local policy            |                               |
+| `SearchBucketPrefix`  | Prefix length and registrars allowed per prefix in a search bucket            | `/24`, `2` per bucket   | Local policy            | [Values][r-values]            |
+| `SearchSubnetLimit`   | Distinct registrars queried per `/24` in a lookup, each counted for `E`       | `10`                    | Local policy            | [Values][r-values]            |
 | `SearchYieldFloor`    | Yield threshold for staying at the responding bucket instead of moving closer | `8`                     | Local policy            | [Adaptive search][r-adaptive] |
 | `SearchYieldWindow`   | Yield samples kept per search bucket                                          | `4`                     | Local policy            | [Values][r-values]            |
 | `SearchMinSamples`    | Yield samples a bucket needs before a response moves the active bucket        | `2`                     | Local policy            | [Values][r-values]            |

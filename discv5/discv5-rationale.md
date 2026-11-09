@@ -1039,6 +1039,26 @@ result can wait when too few registrars have answered. A search that reaches `Se
 forgets its oldest entries and may receive those advertisers again. No measurement supports these
 four values.
 
+### Search IP Limits
+
+`SearchBucketPrefix` allows 2 registrars per /24 in a search bucket, and `SearchSubnetLimit`
+10 distinct node IDs per /24 in one search, each counted for `E` from its first query. Both values
+are those of the ordinary node table, which allows 2 per /24 in a bucket and 10 in the table.
+
+A per-bucket limit alone has no memory: the search table is rebuilt every pass, so an attacker
+with a few /24 networks can present new node IDs on each pass. In a 30,000-node simulation with
+honest addresses from a discv5 crawl and an attacker on two /24 networks answering with useless
+advertisements, the per-bucket limit alone left 92.1 % of queries going to sybils. With the limit
+of 10 per search, 0.63 % went to sybils, and all 918 searchers reached 90 % of the service's
+providers, with a mean t90 of 132 s. Limits of 1 and 2 per search also stop this attack, with
+0.07 % and 0.13 %, but slow honest searches, to a mean t90 of 273 s and 175 s, against 124 s with
+10. The result comes from one run. The attacker's allowance grows by 10 with each further /24.
+
+The advertise table allows only one registrar per /24 in a bucket because a place in it holds an
+advertisement for a whole lifetime, while a place in a search bucket costs one query. The
+[eclipse results](#why-filter-and-mix-lookup-results) for `SearchMixRegistrars` were measured with
+both limits in force.
+
 ## TopDisc Security Considerations
 
 The following security considerations apply to TopDisc.
