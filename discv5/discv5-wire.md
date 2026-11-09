@@ -212,10 +212,9 @@ When handling NODES as a response to FINDNODE, the recipient should verify that 
 received nodes match the requested distances.
 
 When NODES appears as a response to REGTOPIC or TOPICQUERY, it carries auxiliary ENRs:
-candidate registrars that the requester can add to its service table `B(topic)`. They come from
-the recipient's ordinary node table, not from its ad cache, so an auxiliary ENR says nothing
-about whether that node advertises `topic`. The advertisers registered for `topic` are
-returned in TOPICNODES.
+candidate registrars from the recipient's ordinary node table, which say nothing about whether
+those nodes advertise `topic`. The advertisers registered for `topic` are returned in
+TOPICNODES.
 
 For each entry `d` in the request's `topic-distance` list, in list order, the recipient
 SHOULD return at most one ENR of a node `n` that meets all of these conditions:
@@ -363,9 +362,7 @@ return sends a single empty TOPICNODES response with `total` set to `1`.
 
 The `topic-distance` list serves the same purpose as in REGTOPIC: it tells the recipient
 which log2 distances from `topic` the sender's service table still has room for, so the
-recipient can choose useful auxiliary ENRs to include in its NODES responses. The list is in
-priority order: a recipient that caps the number of auxiliary ENRs serves the earliest listed
-distances first. A discoverer lists the distances from farthest to closest to `topic`.
+recipient can choose useful auxiliary ENRs to include in its NODES responses. The list is in priority order, as in REGTOPIC. A discoverer lists the distances from farthest to closest to `topic`.
 
 See the [theory section on lookup responses] for the registrar side, the [theory section on
 the lookup procedure] for how the discoverer uses the responses, and the [theory section on
@@ -413,6 +410,7 @@ A collection of test vectors for this specification can be found at
 [theory section on auxiliary ENRs]: ./discv5-theory.md#auxiliary-enr-selection
 [theory section on service tables]: ./discv5-theory.md#service-tables
 [public]: ./discv5-theory.md#public-addresses
+[theory section on parameters]: ./discv5-theory.md#parameters
 [EIP-778]: ../enr.md
 [theory section on response limits]: ./discv5-theory.md#response-splitting
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md
