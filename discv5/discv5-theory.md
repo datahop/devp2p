@@ -308,17 +308,10 @@ carries the service identifier `s`. A **topic-distance** is the logarithmic dist
 sent in answer to a request, and the **reply** to a request is all the response packets that
 answer it.
 
-## Co-existence with Node Discovery
-
-A TopDisc-capable node first joins the network using [FINDNODE] and populates its node table, then
-uses the TopDisc-capable nodes it finds there to fill its service tables. A node may remain usable
-for ordinary node discovery while it is unusable for TopDisc; see
-[TopDisc Liveness and Temporary Exclusion](#topdisc-liveness-and-temporary-exclusion).
-
-TopDisc requires no change to nodes that do not implement it. `td` is an ordinary ENR entry, so
-every Discovery v5 node stores it and returns it in [NODES] responses as part of the signed record.
-A TopDisc-capable node therefore finds TopDisc-capable peers with unmodified Discovery v5 lookups,
-through any node, by reading `td` in the ENRs it learns. TopDisc requests are sent only to nodes
+A TopDisc-capable node first joins the network using Discovery v5 [FINDNODE] and populates its node table, then
+uses the TopDisc-capable nodes it finds there to fill its service tables. 
+A TopDisc-capable node  finds TopDisc-capable peers with unmodified Discovery v5 lookups,
+through any node, by reading `td` ENRs capability. TopDisc requests are sent only to nodes
 with a supported `td`, so other nodes never receive them.
 
 ## ENR Capability
