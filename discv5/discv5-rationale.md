@@ -964,10 +964,7 @@ renewal traffic. A 25,000-node run replaying this churn at 16 times the rate ret
 million results from nodes down longer than `E`.
 
 The value is not an optimum: 30 minutes also stays under 1 % across all nodes, at about half the
-renewal traffic.
-An [earlier evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7f2324/doc/report_m4/reports/ad_lifetime.md)
-preferred a short lifetime because the network then stays easier for new nodes to register in,
-spreads discovered nodes better, and resists sybil and denial-of-service attacks better.
+renewal traffic. [DISC-NG] uses the same 15 minutes, chosen with the devp2p developers.
 
 ### Ad Cache and Waiting Times
 
@@ -998,10 +995,8 @@ The size of the advertise table is a tradeoff between registration performance a
 peak nodes, the registrars nearest the service identifier. Each bucket closer to the identifier
 covers half as much of the key space, so it holds about half as many registrars to take the same
 `K_register` advertisements. A larger bucket places more advertisements, but the traffic it adds
-falls on those registrars. An
-[earlier 2,000-node evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7f2324/doc/report_m4/reports/tickettable.md)
-found that registrations and traffic grew together with bucket size, without a matching gain in
-lookups.
+falls on those registrars. [DISC-NG] states the same trade-off: a larger `K_register` makes an
+advertiser easier to find, at the cost of more communication and storage.
 
 `K_register` is 10. The table gives a 50,000-node simulation with the service sizes of a discv5
 crawl and no attackers, averaged over two runs. Registrars per advertiser is the median number
