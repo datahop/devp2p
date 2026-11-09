@@ -464,16 +464,12 @@ registrars across multiple buckets rather than relying on a single topic-specifi
 A malicious actor may attempt to make discoverers of a target topic receive only
 advertisements for malicious nodes.
 
-Using advertisements from multiple registrars and encouraging diversity in registrar ad
-caches can reduce the effectiveness of this attack. Distributed placements and registrar
-selection provide opportunities for source diversity; lookup does not enforce a minimum
-number of distinct responding registrars. The [lookup response] limits how much one registrar can return, while
-[advertisement placement] distributes advertisements across multiple registrars. The
-lookup result target counts distinct advertisers and does not itself guarantee diversity
-of registrar sources. The lookup [mixes results](#why-filter-and-mix-lookup-results): it
-interleaves queued results from available registrars where possible. Mixing is not a
-minimum-source guarantee: one registrar may supply all the usable results, and every queued
-result is released when the pass ends.
+Using advertisements from multiple registrars and encouraging diversity in registrar ad caches
+can reduce the effectiveness of this attack. The [lookup response] limits how much one
+registrar can return, [advertisement placement] distributes advertisements across registrars,
+and the lookup [mixes results](#why-filter-and-mix-lookup-results). Lookup does not enforce a
+minimum number of distinct responding registrars: one registrar may supply all the usable
+results.
 
 ### Service-Table Poisoning
 
@@ -544,51 +540,24 @@ queried. The rationale for that adaptation is discussed in
 
 ## Why Use Adaptive Search?
 
-Always searching close to the service identifier offers high advertisement availability,
-but concentrates lookup traffic and trust on a relatively small registrar population.
-Remaining too far away distributes load, but can make sparse services difficult to
-discover. A fixed number of queries at every distance cannot adapt to differing service
-popularity and the current distribution of advertisements.
+Always searching close to the service identifier concentrates lookup traffic and trust on a
+small registrar population. Remaining too far away makes sparse services difficult to discover.
+A fixed number of queries at every distance cannot adapt to differing service popularity.
 
-The [TopDisc lookup procedure] records the advertisement yield of each registrar query, defined as
-the number of valid, de-duplicated advertisement records in the registrar's response.
-Each yield sample is associated with the search bucket containing
-the queried registrar.
+The [TopDisc lookup procedure] therefore steers by the advertisement yield of each search
+bucket. A yield sample counts the records as the registrar sent them, before the discoverer's
+own filtering, because it measures how many advertisements registrars at that distance hold.
+Counting after the result filter would make a registrar look sparse once the discoverer had
+seen its advertisements, and would drive the search inward although the registrar is dense. A
+partial response counts only if it reaches `SearchYieldFloor`, because its count is a lower
+bound: it can show that a bucket is dense enough, but not that it is sparse.
 
-The sample counts the records as the registrar sent them, before the discoverer's own
-filtering. It measures how many advertisements registrars at that distance hold. Counting
-after the result filter would make a registrar look sparse once the discoverer had seen its
-advertisements, and would drive the search inward although the registrar is dense. A partial response counts
-only if it reaches `SearchYieldFloor`, because its count is a lower bound: it can show that
-a bucket is dense enough, but not that it is sparse.
-
-As specified by the [TopDisc lookup procedure], once enough yield samples have been
-collected for a bucket, they are used to choose the next search bucket. Let `lower` and `upper` denote the lower and
-upper middle samples after sorting the observed yields.
-
-If `lower >= F_return`, registrars in the bucket are consistently returning full
-responses, so the search moves one bucket farther from the service identifier.
-Otherwise, if `upper >= SearchYieldFloor`, the search continues in the same bucket.
-
-When `upper < SearchYieldFloor`, the search moves towards buckets closer to the service
-identifier. For a non-zero yield, the number of buckets moved is:
-
-    ceil(log2(SearchYieldFloor / upper))
-
-with the movement limited to four buckets. If `upper = 0`, the search moves up to four
-buckets closer to the service identifier.
-
-The adaptive rule therefore moves closer when the current bucket provides too few
-advertisements, remains at the current distance when its yield is sufficient, and moves
-slightly farther away when registrars are consistently returning full responses.
-
-The jump size follows from [advertisement placement]. Advertisers aim for the same number of
-registrations, `K_register`, in every bucket, while each bucket closer to the service
-identifier covers half as much of the key space and so holds about half as many registrars.
-Advertisements per registrar therefore roughly double with each bucket inward. A bucket
-yielding `upper` advertisements per query is about `log2(SearchYieldFloor / upper)` buckets
-farther out than the first bucket expected to reach the floor, so the search jumps there
-directly.
+The jump size follows from [advertisement placement]. Advertisers aim for `K_register`
+registrations in every bucket, while each bucket closer to the service identifier holds about
+half as many registrars, so advertisements per registrar roughly double with each bucket
+inward. A bucket yielding `upper` advertisements per query is about `log2(SearchYieldFloor /
+upper)` buckets farther out than the first bucket expected to reach the floor, so the search
+jumps there directly.
 
 A floor limits the load on registrars, and its value sets the speed of the search. In a
 10,000-node testbed run, a floor of 4 cut the maximum number of TOPICQUERY requests received by
@@ -599,67 +568,49 @@ service, floors of 2 and 4 settled where a response carries about four advertise
 registrar received about 2,000 queries, against about 150,000 with no floor. `SearchYieldFloor`
 is 8, the lowest of these values that keeps the speed of a search with no floor.
 
-A yield sample from a fallback bucket more than `SearchAuxRadius` from the active bucket moves
-it only in the direction that
-advertisement density does not already predict. Low yield farther out than the active bucket,
-or sufficient yield closer in, is expected and says nothing about the active bucket. Sufficient
-yield farther out shows that the search can move out, and low yield closer in shows that it
-must move further in.
-
 ## Why Search in Passes?
 
 A lookup has no natural end: the caller reads results for as long as it needs peers. The
-[TopDisc lookup procedure] therefore runs as a series of bounded passes, each starting from
-the bucket the previous one settled on. The cap of `SearchPassQueries` queries per pass
-bounds a pass even when auxiliary ENRs keep refilling the active bucket.
+[TopDisc lookup procedure] therefore runs as a series of bounded passes. The cap of
+`SearchPassQueries` bounds a pass even when auxiliary ENRs keep refilling the active bucket.
 
-Registrar ad caches change on the time scale of the advertisement lifetime `E`. Asking the
-same registrar again within that time mostly returns advertisements the discoverer already
-has, so the asked set keeps answered registrars out of later passes for `E`. One spare
-re-ask per pass, choosing the registrar asked longest ago, keeps a lookup going when every
-known registrar has been asked. The failed set keeps a dead node from the routing table from
-being picked again in every pass. A bucket whose queries all failed gets one retry pass, so
-that a single dead registrar cannot hold the search at one distance.
-
-When a lookup that started at the closest bucket sees no usable advertisement, the service may have
-had no advertisers when the lookup reached that bucket. Starting again at the farthest bucket
-lets the lookup find advertisers that appear later.
+Registrar ad caches change on the time scale of `E`, and asking the same registrar again sooner
+mostly returns advertisements the discoverer already has, so the asked set keeps answered
+registrars out of later passes for `E`. One spare re-ask per pass, of the registrar asked
+longest ago, keeps a lookup going when every known registrar has been asked. The failed set
+keeps a dead node from being picked in every pass. A bucket whose queries all failed gets one
+retry pass, so that a single dead registrar cannot hold the search at one distance.
 
 Passes that find nothing new are spaced out, doubling from `SearchPassGap` up to
 `SearchPassBackoff`. In a 30,000-node simulation with late-joining advertisers, a 60 s cap cut
 the TOPICQUERY requests received by the busiest registrar from 2,806 without back-off to 565. A
-late joiner in a topic with fewer than 10 providers was found 0.6 s later at the median and
-10 s later at the 90th percentile. For topics with 10 to 99 providers, t90, the time until a
+late joiner in a topic with fewer than 10 providers was found 0.6 s later at the median and 10
+s later at the 90th percentile. For topics with 10 to 99 providers, t90, the time until a
 searcher has found 90 % of its topic's providers, went from 321 s to 350 s; a 300 s cap raised
 it to 510 s.
 
-The discoverer stops sending queries while `SearchUnreadLimit` results wait unread. A caller
-that reads slowly then does not cause queries whose results it would not use.
+The discoverer stops sending queries while `SearchUnreadLimit` results wait unread, so that a
+slow caller does not cause queries whose results it would not use.
 
 ## Why Filter and Mix Lookup Results?
 
-Successive passes query different registrars, which often hold the same advertisers. The
-result filter keeps the caller from receiving the same advertiser again for an advertisement
-lifetime. An advertiser that changes its ENR is delivered once more, so the caller learns the
-new record, but only once, so that an advertiser cannot reach the caller repeatedly by
-updating its record.
+Successive passes query different registrars, which often hold the same advertisers. The result
+filter keeps the caller from receiving the same advertiser again for `E`. An advertiser that
+changes its ENR is delivered once more, so the caller learns the new record, but only once, so
+that an advertiser cannot reach the caller repeatedly by updating its record.
 
-Without mixing, a pass would deliver the first registrar's whole response before any other
-registrar's results. A caller that stops after its first few results would then depend on a
-single registrar, which a malicious registrar could fill with sybil advertisements. Mixing
-holds results until several registrars have answered, a short wait has passed, or the pass ends, and
-then delivers them one registrar at a time. In simulation, mixing
-cut the share of searches whose first results were all sybils from 21 % to 0.15 %. Mixing
-does not remove the eclipse risk of a large `F_return`; see
-[Eclipse Risk and `F_return`](#eclipse-risk-and-f_return).
+Without mixing, a caller that stops after its first few results would depend on a single
+registrar, which a malicious registrar could fill with sybil advertisements. In simulation,
+mixing cut the share of searches whose first results were all sybils from 21 % to 0.15 %.
+Mixing does not remove the eclipse risk of a large `F_return`; see [Eclipse Risk and
+`F_return`](#eclipse-risk-and-f_return).
 
 `SearchMixRegistrars` is 10. In one simulation run of 50,000 nodes, with 20 % sybil nodes on
 100 /24 networks and all IP limits applied, the share of searches that received only sybils in
 their first 16 results fell from 0.27 % with 5 registrars to 0.02 % with 10. Recall and the
 sybil share of all results remained approximately unchanged. The mean sybil share of the first
 16 results rose from 38.5 % to 41.3 %. The median first result on this run's single large topic
-arrives later, at 0.60 s rather than 0.30 s in the simulation's latency model. A search that
-finds fewer registrars with results waits for `SearchMixWait` or the end of the pass.
+arrives later, at 0.60 s rather than 0.30 s in the simulation's latency model.
 
 ## Why Topic-Centered Service Tables?
 
@@ -702,15 +653,12 @@ The cache bounds registrar storage and makes advertisements soft state. Advertis
 renew or replace advertisements over time, which allows the system to adapt to churn,
 failures, and changes in service participation.
 
-The cache is a hard limit. A full cache does not evict an admitted advertisement, so that a
-new advertiser cannot push out an honest one by asking. It quotes `maxWaitTime` minus the
-credited waiting time, and returns a ticket for the time of its next expiry only once the
-credited waiting time is within `W_min` of `maxWaitTime`.
+The cache is a hard limit. A full cache does not evict an admitted advertisement, so that a new
+advertiser cannot push out an honest one by asking.
 
 A registrar also drops the advertisements of an advertiser that its ordinary node table has
-dropped for failing liveness checks. The registrar has then seen the advertiser fail, and
-returning its advertisements would send discoverers to a node that is likely gone for the
-rest of the advertisement lifetime.
+dropped for failing liveness checks, since returning them would send discoverers to a node that
+is likely gone for the rest of the advertisement lifetime.
 
 The [ad cache] and [service table] serve different purposes: the former stores
 advertisements at a registrar, while the latter provides the service-centred view used
@@ -763,69 +711,57 @@ to the advertised ENR; see [Ticket Transfer](#ticket-transfer).
 
 ## Why Answer Every Registration Request?
 
-An advertiser cannot tell a silent registrar from a dead one. If a registrar drops a request
-it does not like, the advertiser sees a timeout: it holds the registrar in its failed set for
-an advertisement lifetime and counts a liveness failure against it in its node table. The
-registrar is penalised as if it had failed, and the advertiser loses a working registrar.
+An advertiser cannot tell a silent registrar from a dead one. A request dropped without an
+answer ends as a timeout: the registrar enters the failed set for `E` and takes a liveness
+failure in the advertiser's node table, and the advertiser loses a working registrar.
 
 In a 25,000-node run with churn and unreachable ("ghost") nodes, with registrars that answer
 nothing to a ticket outside its window, TopDisc searchers found a median of 35.7 % of their
-topic's providers, against 72.3 % with plain discv5. The REGTOPIC traces of that run show
-that 96 % of the ticket retries arrived after the 5 s window and
-were dropped without an answer; these made up 76 % of all REGTOPIC timeouts. The [tickets]
-rules therefore answer every request: a rejection with an explicit empty response, an early
-ticket with the remaining wait, a late ticket within the grace `ε` with the wait it was
-scheduled to have, and an expired or invalid ticket as a new attempt.
+topic's providers, against 72.3 % with plain discv5. In that run 96 % of the ticket retries
+arrived after the 5 s window and were dropped without an answer; these made up 76 % of all
+REGTOPIC timeouts. The [tickets] rules therefore answer every request.
 
 The retries that did arrive inside the window were late, relative to its start, by 50 ms at the
 median and 3.8 s at the 99th percentile. The late grace `ε` credits a retry that misses the
-window by a few seconds with the wait it was scheduled to have, instead of restarting its
-wait. `ε` is short against `E`, so a ticket cannot be redeemed long after it was earned, and
-the ticket issued in reply is re-based so that the lateness is not credited later either.
+window by a few seconds with the wait it was scheduled to have, instead of restarting its wait.
+`ε` is short against `E`, so a ticket cannot be redeemed long after it was earned, and the
+ticket issued in reply is re-based so that the lateness is not credited later either.
 
-A ticket is credited once while the registrar remembers it. Without that rule, an advertiser whose advertisement was removed,
-for example after the registrar's node table dropped it, could present the ticket that
-admitted it again and obtain a new advertisement with a full lifetime without waiting. An early
-ticket is returned unchanged rather than re-issued: a re-issued ticket would be a second valid
-ticket for the same window, which the memory of credited tickets would not recognise. It also
-keeps an early retry from learning the current waiting time.
+A ticket is credited once while the registrar remembers it. Otherwise an advertiser whose
+advertisement was removed could present the ticket that admitted it again and obtain a full
+lifetime without waiting. An early ticket is returned unchanged because a re-issued ticket
+would be a second valid ticket for the same window, which the memory of credited tickets would
+not recognise. It also keeps an early retry from learning the current waiting time.
 
-A registrar admits any advertisement whose remaining wait is at most `W_min`, so it has no
-reason to quote less. An honest registrar can still send a shorter wait: a full cache quotes the
-time until its next expiry, and an early ticket comes back with whatever remains of its wait.
-Dropping a registrar for such a quote would penalise correct behaviour, so the advertiser
-waits `W_min` instead. A hostile registrar that answers every retry with a zero wait gains
-little from this. The advertiser sends it at most one request per `W_min`, per-bucket
-scheduling keeps it from delaying the other buckets, and the clamped waits add up to
-`RegAttemptBudget`, after which the attempt is abandoned.
+An honest registrar can quote less than `W_min`, for a full cache's next expiry or an early
+ticket's remaining wait, so the advertiser waits `W_min` instead of dropping it. A hostile
+registrar that answers every retry with a zero wait
+gains little: the advertiser sends it at most one request per `W_min`, per-bucket scheduling
+keeps it from delaying the other buckets, and the clamped waits add up to `RegAttemptBudget`,
+after which the attempt is abandoned.
 
 ## Why Schedule Registrations Per Bucket?
 
 A ticket retry is useful only inside its window. With a single sender per advertised topic, a
-due ticket retry waits behind every first contact ahead of it, each of which can take a 700 ms
-timeout when the registrar is dead, and misses its window. Several concurrent senders keep one
+due retry waits behind every first contact ahead of it, each of which can take a 700 ms timeout
+when the registrar is dead, and misses its window. Several concurrent senders keep one
 unresponsive registrar from holding back the rest.
 
 Serving buckets in turn keeps a bucket with many new candidates from delaying the retries of
-another bucket. Within a bucket, a due ticket retry goes before a first contact, because its
-window is about to pass and a first contact can wait. The priority is per bucket, not global:
-registrars that answer every request with a ticket cannot take all the senders.
+another bucket. Within a bucket, a due retry goes first because its window is about to pass and
+a first contact can wait. The priority is per bucket, so that registrars that answer every
+request with a ticket cannot take all the senders.
 
-The attempt budget `RegAttemptBudget` bounds how long an advertiser keeps waiting on one
-registrar. After `E`, every advertisement in the registrar's cache has expired and been
-replaced, so a registrar that still has not admitted the advertisement is overloaded or
-malfunctioning, and the advertiser does better with another one. The budget is not a failure:
-the registrar answered, so it goes to a separate overloaded set rather than the failed set,
-and it may be tried again once it leaves that set after `E`.
+After `E`, every advertisement in a registrar's cache has been replaced, so a registrar that
+still has not admitted the advertisement is overloaded or malfunctioning, and the advertiser
+does better with another one. That registrar answered, so it goes to a separate overloaded set
+rather than the failed set.
 
-The failed set keeps a registrar that timed out, rejected the request or sent a malformed
-response out of the advertise table for an advertisement lifetime, from every source, so that auxiliary
-ENRs and the node table do not offer it again at once.
+The failed set applies to every source, so that auxiliary ENRs and the node table do not offer
+a failed registrar again at once.
 
-Renewal takes the next standby candidate rather than the same registrar. This spreads an
-advertiser's advertisements over more registrars across successive lifetimes, and a registrar
-does not extend an advertisement it already holds, so registering again with it before expiry
-would not help.
+Renewal takes the next standby candidate rather than the same registrar, which spreads an
+advertiser's advertisements over more registrars across successive lifetimes.
 
 ## Why Recompute Waiting Times?
 
@@ -868,14 +804,12 @@ increases.
 The [waiting-time function] differs from the form in [DISC-NG], which multiplies
 `E / (1 - c/C)^Pocc` by `c(ad.service)/c + score(ad.IP) + G` for a small safety constant `G = 10^-7`.
 
-The safety constant `G` is kept, as an additive term multiplied by the occupancy factor. It
-adds less than `W_min` while the cache is less than about 69 % full, so at light load the
-admission slack absorbs it. Near full occupancy it is the only cost charged to an advertisement
-for a new service from a diverse address: it reaches `E` at about 84 % occupancy and
-`RegAttemptBudget` at about 85 %. Above that, a registrar stops admitting such advertisements,
-which keeps its last places free and is the flow control [DISC-NG] intends; see
-[Admission Near Full Occupancy](#admission-near-full-occupancy). The safety term is not
-lower-bounded: it falls with occupancy, while the service and IP components keep their bounds.
+`G` is kept, as an additive term multiplied by the occupancy factor. It adds less than `W_min`
+while the cache is less than about 69 % full, so at light load the admission slack absorbs it.
+Near full occupancy it is the only cost charged to a new service from a diverse address: it
+reaches `E` at about 84 % occupancy and `RegAttemptBudget` at about 85 %, which keeps the last
+places free and is the flow control [DISC-NG] intends; see [Admission Near Full
+Occupancy](#admission-near-full-occupancy).
 
 Using `max(c(ad.service)/c + score(ad.IP), 10^-6)` instead of an additive `G` would charge a new service from
 a diverse address almost nothing at any occupancy.
@@ -884,14 +818,12 @@ The service term divides by `c + 1` instead of `c`, which defines it for an empt
 without a special case. The factor `Wbase = 0.1` scales the occupancy term, so that an empty
 cache charges at most `E / 10` for a fully similar advertisement.
 
-The occupancy factor makes the waiting time grow very fast as the cache fills: about
-`3 * 10^10` seconds at 86 % occupancy. Converted to a 64-bit nanosecond duration, such a value
-is out of range, and an overflowing conversion can turn a long wait into an immediate
-admission: a cache about 86 % full or more would then admit every request. The waiting time
-is therefore capped at `maxWaitTime` before the
-conversion. The cap is far above `RegAttemptBudget`, so a capped quote still makes the
-advertiser move to another registrar, on every platform. For the same reason, advertisers
-saturate a `wait-time` that does not fit their duration type.
+The waiting time reaches about `3 * 10^10` seconds at 86 % occupancy, out of range for a 64-bit
+nanosecond duration. An overflowing conversion can turn a long wait into an immediate
+admission, so the waiting time is capped at `maxWaitTime` before the conversion. The cap is far
+above `RegAttemptBudget`, so a capped quote still makes the advertiser move to another
+registrar. For the same reason, advertisers saturate a `wait-time` that does not fit their
+duration type.
 
 ## Why Use a Waiting-Time Lower Bound?
 
@@ -900,11 +832,9 @@ incentivised to repeatedly request new tickets in the hope of obtaining a shorte
 This would create unnecessary traffic and processing load.
 
 The [waiting-time lower bound] limits how fast the service and IP components of a new waiting
-time can fall: while a bound is retained, a component charged later is at least the recorded
-value minus the elapsed time. Bounds are capped at `maxWaitTime`, a service bound is dropped with
-the service's last advertisement, IP bounds disappear with their branch of the IP similarity
-tree, and the safety term is not bounded, so the limit does not hold beyond them. It reduces the
-incentive to repeatedly request new tickets while keeping registrar state bounded.
+time can fall, which reduces the incentive to repeatedly request new tickets. The limit lasts
+only as long as a bound does: a bound disappears with the service's last advertisement or its
+branch of the IP similarity tree, and the safety term has none.
 
 The lower-bound state is maintained only for bounded structures, such as topics that have
 advertisements in the ad cache and prefixes represented in the IP similarity tree.
@@ -920,16 +850,9 @@ tables. Returned ENRs are auxiliary routing information, not lookup results.
 Implementations must validate them and check TopDisc capability in the ENR before
 inserting them into service tables.
 
-When a request includes topic-distances for which the requester needs additional
-candidates, the registrar returns at most one auxiliary ENR for each requested distance.
-This keeps responses compact and limits the amount of routing information contributed
-for any one requested distance.
-
-During lookup, auxiliary candidates are requested for topic-distances
-corresponding to the active search bucket and nearby buckets with available capacity.
-With `SearchAuxRadius = 1`, this normally covers the active bucket and its immediate
-neighbours. This helps replenish registrar candidates near the part of the
-service-centred key space currently being searched. In a 30,000-node simulation with the
+During lookup, auxiliary candidates are requested for the active search bucket and its
+immediate neighbours (`SearchAuxRadius = 1`), which replenishes candidates near the part of the
+key space being searched. In a 30,000-node simulation with the
 service sizes of a discv5 crawl, this radius cut the total number of TOPICQUERY requests from
 35.4 million, with auxiliary ENRs requested for every bucket with free space, to 2.7 million.
 Every service with fewer than 10 providers was still found in full.
@@ -951,8 +874,8 @@ handle TopDisc messages.
 ## Why These Parameter Values?
 
 Where a measurement or a bound supports the value of a
-[parameter](./discv5-theory.md#parameters), this section gives it. Where none does, the section says so, and the value is a working value
-rather than an optimum.
+[parameter](./discv5-theory.md#parameters), this section gives it. Any other value is a working
+value rather than an optimum.
 
 ### Advertisement Lifetime
 
@@ -968,35 +891,26 @@ renewal traffic. [DISC-NG] uses the same 15 minutes, chosen with the devp2p deve
 
 ### Ad Cache and Waiting Times
 
-`C` is 1,000. A 25,000-node simulation with the service sizes of a discv5 crawl and no attackers
-compared 500, 1,000, 2,500 and 5,000, averaged over three runs. From 5,000 to 1,000, the
-advertisements held by the busiest registrar fell from 1,011 to 233 and its REGTOPIC requests from
-68,800 to 50,500. Recall stayed at 100 %, and t90 for services with 1,000 or more advertisers rose
-from 109 s to 116 s. Advertisers abandoned a registrar more often, 131 times per advertiser against
-23. At 500, abandonment about doubled again for a further fall to 138 advertisements. Occupancy of
-the busiest registrar stopped at 20 to 28 % at every size.
+`C` is 1,000. A 25,000-node simulation with the service sizes of a discv5 crawl and no
+attackers compared 500, 1,000, 2,500 and 5,000, averaged over three runs. From 5,000 to 1,000,
+the advertisements held by the busiest registrar fell from 1,011 to 233 and its REGTOPIC
+requests from 68,800 to 50,500. Recall stayed at 100 %, and t90 for services with 1,000 or more
+advertisers rose from 109 s to 116 s. Advertisers abandoned a registrar more often, 131 times
+per advertiser against 23. At 500, abandonment about doubled again for a further fall to 138
+advertisements. Occupancy of the busiest registrar stopped at 20 to 28 % at every size.
 
-`Pocc` is 10 and `Wbase` is 0.1. `Wbase` makes an empty cache charge at most `E / 10` for a fully
-similar advertisement. With these values the safety term reaches `E` at about 84 % occupancy and
-`RegAttemptBudget` at about 85 %. No measurement supports these two values.
+`Pocc` is 10 and `Wbase` is 0.1; [the waiting-time
+rationale](#why-change-the-waiting-time-function) gives their effect. `G` is the value from the
+[DISC-NG] paper. `W_min` is 1 s: a remaining wait below it is too short to be worth another
+round trip. `δ` is 5 s and `ε` is 10 s.
 
-`G` is the value from the [DISC-NG] paper, and no measurement in this document compares values.
+### Registration Table
 
-`W_min` is 1 s: a remaining wait below it is too short to be worth another round trip. No
-measurement supports this value.
-
-`δ` is 5 s and `ε` is 10 s. `ε` credits a retry that misses the window by a few seconds and is
-short against `E`, so a ticket cannot be redeemed long after it was earned. No measurement
-compares other values of either.
-
-### Advertise Table
-
-The size of the advertise table is a tradeoff between registration performance and the load on
-peak nodes, the registrars nearest the service identifier. Each bucket closer to the identifier
-covers half as much of the key space, so it holds about half as many registrars to take the same
-`K_register` advertisements. A larger bucket places more advertisements, but the traffic it adds
-falls on those registrars. [DISC-NG] states the same trade-off: a larger `K_register` makes an
-advertiser easier to find, at the cost of more communication and storage.
+A larger bucket places more advertisements, but the traffic it adds falls on the peak
+registrars nearest the service identifier: each bucket closer to the identifier covers half as
+much of the key space, so about half as many registrars take the same `K_register`
+advertisements. [DISC-NG] states the same trade-off: a larger `K_register` makes an advertiser
+easier to find, at the cost of more communication and storage.
 
 `K_register` is 10. The table gives a 50,000-node simulation with the service sizes of a discv5
 crawl and no attackers, averaged over two runs. Registrars per advertiser is the median number
@@ -1014,49 +928,46 @@ Discovery improves up to 10. At 16 it does not improve further, while the load g
 60 %.
 
 `RegTableDepth` is 18. The closest bucket covers 2^-17 of the key space and absorbs anything
-closer, so it reaches `K_register` registrars only at about 1.3 million nodes, and the depth does
-not limit placement at the current network size. A smaller depth merges the registrars nearest
-the identifier into one bucket, which lowers the peak load but leaves rare services harder to
-find. In one 50,000-node simulation with 1,000 services of Zipf-distributed size, a depth of 10
-cut the REGTOPIC requests received by the busiest registrar from 53,777 to 25,894. It raised t90
-for services with fewer than 10 advertisers from 0.96 s to 15.9 s, and for 10 to 99 advertisers
-from 0.96 s to 2.5 s. Recall did not change.
+closer, so it reaches `K_register` registrars only at about 1.3 million nodes, and the depth
+does not limit placement at the current network size. A smaller depth merges the registrars
+nearest the identifier into one bucket, which lowers the peak load but leaves rare services
+harder to find. In one 50,000-node simulation with 1,000 services of Zipf-distributed size, a
+depth of 10 cut the REGTOPIC requests received by the busiest registrar from 53,777 to 25,894.
+It raised t90 for services with fewer than 10 advertisers from 0.96 s to 15.9 s, and for 10 to
+99 advertisers from 0.96 s to 2.5 s. Recall did not change.
 
-`RegStandbyLimit` is 20, enough candidates to replace a full bucket twice. It keeps the state of
-one bucket to 30 registrars. No measurement supports the exact value.
+`RegStandbyLimit` is 20, enough candidates to replace a full bucket twice, which keeps the
+state of one bucket to 30 registrars.
 
 `RegSenders` is 4, so that a ticket retry rarely waits for a timeout to a dead registrar to
-finish. `RegLoopMinPeriod` keeps the registration loop from spinning when the local node table is
-nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
-`RegAttemptBudget` is `1.5 * E`: after `E` every advertisement in the cache has been replaced, and
-the extra half lifetime keeps a quote close to `E` from ending the attempt. No measurement
-supports these four values.
+finish. `RegLoopMinPeriod` keeps the registration loop from spinning when the local node table
+is nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
+`RegAttemptBudget` is `1.5 * E`: the extra half lifetime keeps a quote close to `E` from ending
+the attempt.
 
 ### Search Table and Pacing
 
-`SearchTableDepth` is 18, the same as the advertise table, so that a bucket covers the same part
-of the key space in both. `SearchBucketSize` is 8, which keeps at most 144 candidates held at
-once. Results are not sensitive to the shape of this table: in a 30,000-node simulation with
+`SearchTableDepth` is 18, the same as the registration table, so that a bucket covers the same
+part of the key space in both. `SearchBucketSize` is 8, which keeps at most 144 candidates held
+at once. Results are not sensitive to the shape of this table: in a 30,000-node simulation with
 a yield floor of 4, 32 nodes per bucket instead of 16 and 14 buckets instead of 10 changed
 discovery time, total queries and the load on the busiest registrar by about 2 % or less. Eight
 has not been compared with larger values at the current parameters.
 
 `SearchYieldWindow` is 4 and `SearchMinSamples` is 2. A single response, which may come from a
-hostile registrar, cannot move the search, and four samples keep it reacting within a few queries.
-A search sends one query at a time, so that each sample can steer the next query. No measurement
-supports these two values.
+hostile registrar, cannot move the search, and four samples keep it reacting within a few
+queries. A search sends one query at a time, so that each sample can steer the next query.
 
-`SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at most
-`ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is 8: in
-the 30,000-node table-shape simulation with a yield floor of 4, 16 auxiliary ENRs per response
-made no measurable difference. `RegAuxAccept` equals `AuxENRLimit`. `QueryAuxAccept` is 16. No
-measurement supports this value.
+`SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at
+most `ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is
+8: in the 30,000-node table-shape simulation with a yield floor of 4, 16 auxiliary ENRs per
+response made no measurable difference. `RegAuxAccept` equals `AuxENRLimit`. `QueryAuxAccept`
+is 16.
 
-`SearchPassGap` is 2 s, the shortest spacing of passes, and only passes that find something new
-stay at that spacing. `SearchPassQueries` bounds one pass. `SearchMixWait` bounds how long a
+`SearchPassGap` is 2 s, the shortest spacing of passes. `SearchMixWait` bounds how long a
 result can wait when too few registrars have answered. A search that reaches `SearchFilterSize`
-forgets its oldest entries and may receive those advertisers again. No measurement supports these
-four values. `SearchUnreadLimit` equals `F_return`, one full response.
+forgets its oldest entries and may receive those advertisers again. `SearchUnreadLimit` equals
+`F_return`, one full response.
 
 ### Search IP Limits
 
@@ -1073,10 +984,8 @@ providers, with a mean t90 of 132 s. Limits of 1 and 2 per search also stop this
 0.07 % and 0.13 %, but slow honest searches, to a mean t90 of 273 s and 175 s, against 124 s with
 10. The result comes from one run. The attacker's allowance grows by 10 with each further /24.
 
-The advertise table allows only one registrar per /24 in a bucket because a place in it holds an
-advertisement for a whole lifetime, while a place in a search bucket costs one query. The
-[eclipse results](#why-filter-and-mix-lookup-results) for `SearchMixRegistrars` were measured with
-both limits in force.
+The registration table allows only one registrar per /24 in a bucket because a place in it
+holds an advertisement for a whole lifetime, while a place in a search bucket costs one query.
 
 ### Protocol Limits
 
@@ -1090,15 +999,11 @@ share the 16. The caps keep a registrar from holding a request open by announcin
 `total` or by continuing to send packets. `MaxTopicDistances` is 256 because a request has one entry per log-distance.
 `MaxTopicNodes` is 16, the FINDNODE result limit and `F_return`.
 
-`RespTimeout` is 700 ms, the timeout of other discv5 requests. A timeout counts
-against the node, so a shorter value would penalise slow but working registrars. No measurement
-supports this value for TopDisc. `MinUDPPort` is 1024: discovery nodes do not use privileged ports,
+`RespTimeout` is 700 ms, the timeout of other discv5 requests. A timeout counts against the
+node, so a shorter value would penalise slow but working registrars. `MinUDPPort` is 1024: discovery nodes do not use privileged ports,
 and dropping such records keeps a response from directing a node's packets at system services.
 
 ### Ticket Bounds
-
-Only the issuing registrar verifies a ticket, so its authentication is local. HMAC-SHA256 is one
-example, and interoperability does not depend on it.
 
 `UsedTicketLimit` is 16,384. A ticket can be replayed only within `UsedTicketTTL`, 15 s after it
 is credited, so the limit covers about 1,090 credited tickets per second, against about 1.1
@@ -1106,38 +1011,31 @@ admissions per second for a full cache of 1,000 at `E = 15 min`. The MACs and ex
 a flood of credited tickets reaches the limit, and the oldest entries, those of the flood, are
 dropped first.
 
-
 ## TopDisc Security Considerations
-
-The following security considerations apply to TopDisc.
 
 ### Ticket Transfer
 
-The [ticket mechanism] binds a ticket to the topic and the advertiser's node ID. A ticket handed
-to another node is not credited, so tickets cannot
-be moved between identities, and a ticket issued for one topic cannot be used for another. A
-ticket is not bound to the advertised ENR: a node that changes its record during an attempt,
-under the same node ID, keeps its ticket and the waiting time it has credited. The required
-waiting time is recomputed at admission from the presented record, so a record with a worse
-address must still wait as long as that address requires; only the elapsed waiting carries
-over. Single use limits each ticket to one admission while the registrar remembers it (see
-[tickets]).
+The [ticket mechanism] binds a ticket to the topic and the advertiser's node ID, so tickets
+cannot be moved between identities or topics. A ticket is not bound to the advertised ENR: a
+node that changes its record during an attempt, under the same node ID, keeps the waiting time
+it has credited. The required waiting time is recomputed at admission from the presented
+record, so a record with a worse address must still wait as long as that address requires; only
+the elapsed waiting carries over. Single use limits each ticket to one admission while the
+registrar remembers it (see [tickets]).
 
 ### Admission Near Full Occupancy
 
 Without `G`, an advertisement for a service with no cached advertisements, from an address with
-a score of `0`, would wait for nothing at any occupancy. Advertisements for many distinct
-services from diverse addresses could then fill a registrar's cache up to `C`. With `G`, such
+a score of `0`, would wait for nothing at any occupancy, so advertisements for many distinct
+services from diverse addresses could fill a registrar's cache up to `C`. With `G`, such
 advertisements are quoted more than `RegAttemptBudget` above about 85 % occupancy, so an
 attacker fills at most about 85 % of the cache this way, and only with addresses diverse enough
-to keep their IP score at `0`: the IP similarity tree counts one entry per advertisement, so
-many advertisements from one prefix raise its score. An advertiser quoted over its budget moves
-to another registrar from its standby list.
+to keep their IP score at `0`: many advertisements from one prefix raise its score.
 
 ### IPv6 Prefixes
 
 Neither address rule aggregates IPv6 addresses at an operator's allocation, such as a `/48` or
-a `/64`. The advertise and search tables apply the IPv4 `/24` prefix length to IPv6 addresses,
+a `/64`. The registration and search tables apply the IPv4 `/24` prefix length to IPv6 addresses,
 which groups addresses far more coarsely than any single allocation. The IP similarity tree
 considers only prefix lengths `k` with `2^k <= N`, which is at most `9` bits with `C = 1,000`.
 Two IPv6 addresses are therefore compared only on their first `9` bits.
@@ -1158,9 +1056,7 @@ eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of 6.
 
 `F_return` is 16, the same limit discv5 applies to a FINDNODE result, so a TOPICNODES answer is
 no larger than an ordinary NODES answer. With [mixing](#why-filter-and-mix-lookup-results) the
-value is safe, and it balances eclipse resistance against search speed. With results mixed across
-`SearchMixRegistrars` registrars and all IP limits applied, 0.02 % of searches received only sybils
-in their first 16 results. In a 30,000-node simulation of one large service, an `F_return` of 6
+value is safe. In a 30,000-node simulation of one large service, an `F_return` of 6
 raised t90 from 348 s to 1,006 s and lowered recall from 100 % to 97.9 %.
 
 # References
