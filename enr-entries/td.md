@@ -31,7 +31,8 @@ Future, non-backwards-compatible revisions of the topic discovery capability MUS
 `version` value. Implementations that encounter an unknown version MUST treat the node
 as if it did not publish the entry at all. Implementations MAY support multiple versions
 simultaneously; the matching rule between local and remote versions is defined by local
-policy.
+policy. A node publishes the single version it speaks on the wire; supporting several means
+accepting peers that publish any of them.
 
 ## Change Log
 

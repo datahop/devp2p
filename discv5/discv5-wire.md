@@ -43,7 +43,8 @@ packets smaller than this size.
 
 Since low-latency communication is expected, implementations should place short timeouts
 on request/response interactions. Good timeout values are 500ms for a single
-request/response and 1s for the handshake.
+request/response and 1s for the handshake. TopDisc requests use `RespTimeout`; see the
+[theory section on parameters].
 
 When responding to a request, the response should be sent to the UDP envelope address of
 the request.
@@ -261,13 +262,13 @@ response data.
     message-type    = 0x07
     topic           = 32-byte service / topic identifier
     ticket          = opaque byte array containing a ticket previously issued by the
-                      recipient registrar; empty (`0x80`) on first attempt
+                      recipient registrar; empty (`0x80`) on the first request
     ENR             = current node record of sender
     topic-distanceₙ = positive integer log2 distance from `topic` where the sender's
                       service table `B(topic)` still has space
 
 REGTOPIC asks the recipient registrar to register the sender (identified by `ENR`) for
-service `topic`. If the sender has a ticket from a previous registration attempt with this
+service `topic`. If the sender has a ticket from a previous request to this
 registrar, it must present the ticket; otherwise `ticket` is the empty byte array.
 
 The `topic-distance` list carries the sender's "send me ENRs at these distances" hint to
@@ -276,8 +277,9 @@ distance to `topic` matches one of the listed values, so the response helps the 
 populate its service table.
 
 The list is in priority order: a recipient that caps the number of auxiliary ENRs serves the
-earliest listed distances first. A sender names its closest table bucket, which holds all
-distances 239 and below, as distance 239; see the [theory section on service tables].
+earliest listed distances first. A sender names its closest table bucket as the largest
+distance that bucket holds, `257 - depth` for a table of `depth` buckets (239 at the default
+depth of 18); see the [theory section on service tables].
 
 A decoded REGTOPIC is always answered with a single REGCONFIRMATION response, including
 requests that the registrar rejects and requests carrying an invalid, expired or already used
@@ -291,7 +293,9 @@ address differs from the packet's source IP address, or if it holds an IP addres
 other family that is not publicly routable (see the [relay rule] section for address
 classes). Only IP addresses are compared: the UDP port is ignored. Discoverers dial the
 advertised record, not the packet source, so the record's addresses must be ones the
-registrar has seen or that can be reached.
+registrar has seen or that can be reached. An `ENR` that does not decode as a record makes
+the message undecodable and it is not answered; a decoded `ENR` that fails signature
+verification is rejected.
 
 See the [theory section on tickets] and [theory section on registrar admission control]
 for the registrar's waiting-time semantics.
@@ -303,11 +307,11 @@ for the registrar's waiting-time semantics.
     request-id   = request-id of REGTOPIC
     total        = total number of responses (REGCONFIRMATION + NODES) to the request, an
                    RLP unsigned integer of at most 255
-    ticket       = ticket issued by the registrar for the next attempt;
+    ticket       = ticket issued by the registrar for the next request;
                    empty byte array (RLP: `0x80`) when the registration was admitted
                    or rejected
     wait-time    = RLP unsigned integer: milliseconds to wait before submitting the next
-                   REGTOPIC attempt with the returned `ticket`. When `ticket` is empty,
+                   REGTOPIC with the returned `ticket`. When `ticket` is empty,
                    `wait-time` carries the advertisement lifetime instead, or `0` for a
                    rejection.
 
@@ -317,9 +321,10 @@ plays three roles, distinguished by `ticket` and `wait-time`:
 - If `ticket` is the empty byte array and `wait-time` is non-zero, the advertisement is in
   the registrar's ad cache. `wait-time` indicates the advertisement lifetime. The advertiser
   caps it at its own advertisement lifetime `E`.
-- If `ticket` is non-empty, the advertisement was not admitted on this attempt. The
-  sender must wait at least `wait-time` milliseconds and re-attempt the registration with
-  the returned `ticket`. A registrar SHOULD NOT quote a `wait-time` below `W_min`
+- If `ticket` is non-empty, the advertisement was not admitted by this request. The
+  sender must wait at least `wait-time` milliseconds before sending another REGTOPIC with
+  the returned `ticket`, and may abandon the attempt as described in the [theory section on
+  the registration procedure]. A registrar SHOULD NOT quote a `wait-time` below `W_min`
   (1,000 ms). An advertiser MUST treat a smaller `wait-time` as `W_min`: it waits at least
   `W_min` before retrying and keeps using the registrar. See the [theory section on
   tickets] and the [theory section on the waiting-time function].
@@ -401,6 +406,7 @@ A collection of test vectors for this specification can be found at
 
 [handshake section]: ./discv5-theory.md#handshake-steps
 [theory section on tickets]: ./discv5-theory.md#tickets
+[theory section on the registration procedure]: ./discv5-theory.md#registration-procedure
 [theory section on registrar admission control]: ./discv5-theory.md#admission-control
 [theory section on the waiting-time function]: ./discv5-theory.md#waiting-time-function
 [theory section on lookup responses]: ./discv5-theory.md#lookup-responses
