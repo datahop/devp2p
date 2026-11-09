@@ -318,12 +318,12 @@ tables.
 
 ## ENR Capability
 
-A node indicates support for service discovery messages by including the [ng ENR entry] in its ENR.
+A node indicates support for service discovery messages by including the [td ENR entry] in its ENR.
 
-    ng = <version>
+    td = <version>
 
-The value of `ng` is an unsigned integer identifying the supported TopDisc protocol
-version. Nodes whose ENR does not contain `ng`, or whose `ng` value is not supported by
+The value of `td` is an unsigned integer identifying the supported TopDisc protocol
+version. Nodes whose ENR does not contain `td`, or whose `td` value is not supported by
 the local implementation are not inserted into service tables and are not selected for
 registration or lookup requests.
 
@@ -350,7 +350,7 @@ registration and lookup procedures.
 
 ## Node Roles
 
-A node that advertises `ng` capability in its ENR acts as a registrar, subject to local policy
+A node that advertises `td` capability in its ENR acts as a registrar, subject to local policy
 and resource limits.
 
 A **registrar** accepts registration and lookup requests, admits advertisements into its
@@ -1070,7 +1070,7 @@ applies to the node's endpoint address; LAN addresses and nodes without an addre
 For each complete response, the discoverer records one advertisement-yield sample for the
 responding registrar's bucket. The sample is the number of advertisement records in the
 [TOPICNODES] responses after per-record validation, the `F_return` size limit and
-de-duplication by node ID within the response, and before the `ng` capability check and the
+de-duplication by node ID within the response, and before the `td` capability check and the
 result filter described below. A complete response containing no advertisements contributes
 a yield sample of `0`.
 
@@ -1168,7 +1168,7 @@ must pass any configured network restrictions. Its UDP port must be greater than
 advertisement whose node ID was already returned by an earlier advertisement of the same query,
 in the same or another [TOPICNODES] packet, is dropped; this de-duplication is separate from that
 of the auxiliary ENRs. The discoverer then discards the advertisements whose ENR does not
-advertise a supported `ng` version, and extracts the advertised ENRs.
+advertise a supported `td` version, and extracts the advertised ENRs.
 Advertisements are candidate results for the target service. The caller may
 stop lookup when it has collected enough distinct advertisers for its local or service-specific
 purpose. This target is denoted `F_lookup` in this document and is determined by the application,
@@ -1396,7 +1396,7 @@ registrar-local (see [Tickets](#tickets)).
 [TOPICQUERY]: ./discv5-wire.md#topicquery-request-0x09
 [TOPICNODES]: ./discv5-wire.md#topicnodes-response-0x0a
 [NODES]: ./discv5-wire.md#nodes-response-0x04
-[ng ENR entry]: ../enr-entries/ng.md
+[td ENR entry]: ../enr-entries/td.md
 [r-ad-cache]: ./discv5-rationale.md#why-use-an-ad-cache
 [r-answer]: ./discv5-rationale.md#why-answer-every-registration-request
 [r-wait]: ./discv5-rationale.md#why-change-the-waiting-time-function
