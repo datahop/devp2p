@@ -882,8 +882,7 @@ a diverse address almost nothing at any occupancy.
 
 The service term divides by `c + 1` instead of `c`, which defines it for an empty cache
 without a special case. The factor `Wbase = 0.1` scales the occupancy term, so that an empty
-cache charges at most `E / 10` for a fully similar advertisement. Both values are provisional,
-pending the parameter decision in datahop/go-ethereum#12.
+cache charges at most `E / 10` for a fully similar advertisement.
 
 The occupancy factor makes the waiting time grow very fast as the cache fills: about
 `3 * 10^10` seconds at 86 % occupancy. Converted to a 64-bit nanosecond duration, such a value
@@ -1149,7 +1148,7 @@ how many entries a single registrar can place in one bucket.
 
 A large `F_return` raises the eclipse risk. In a 30,000-node simulation with 10 % sybil
 nodes, an `F_return` of 16 eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of
-6. The value of `F_return` is part of the parameter decision in datahop/go-ethereum#12.
+6.
 
 # References
 
