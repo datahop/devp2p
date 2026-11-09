@@ -342,7 +342,10 @@ apply the Node Discovery v5 XOR distance function between service identifiers an
 Applications identify a service using a string. This string is hashed to obtain the 32-byte
 service identifier:
 
-    s = H(service-string)
+    s = SHA-256(service-string)
+
+The input is the UTF-8 encoding of the string, with no length prefix, terminator or
+normalisation, so strings that differ in case are different services.
 
 The application chooses the service string. It may encode information such as a protocol name,
 network name, fork identifier, capability, subnet identifier, or a combination of such values.
