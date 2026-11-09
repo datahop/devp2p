@@ -970,6 +970,75 @@ An [earlier evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7
 preferred a short lifetime because the network then stays easier for new nodes to register in,
 spreads discovered nodes better, and resists sybil and denial-of-service attacks better.
 
+### Advertise Table
+
+The size of the advertise table is a tradeoff between registration performance and the load on
+peak nodes, the registrars nearest the service identifier. Each bucket closer to the identifier
+covers half as much of the key space, so it holds about half as many registrars to take the same
+`K_register` advertisements. A larger bucket places more advertisements, but the traffic it adds
+falls on those registrars. An
+[earlier 2,000-node evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7f2324/doc/report_m4/reports/tickettable.md)
+found that registrations and traffic grew together with bucket size, without a matching gain in
+lookups.
+
+`K_register` is 10. The table gives a 50,000-node simulation with the service sizes of a discv5
+crawl and no attackers, averaged over two runs. Registrars per advertiser is the median number
+of registrars holding one advertiser's advertisements. Discovery time is t90 for services with
+1,000 or more advertisers.
+
+| `K_register` | Registrars per advertiser | REGTOPIC received per registrar, median / 99th percentile | Median admission wait | Discovery time |
+|---:|---:|---:|---:|---:|
+| 3  | 31  | 143 / 4,500   | 0.06 s | 369 s |
+| 5  | 48  | 248 / 7,500   | 0.18 s | 305 s |
+| 10 | 87  | 525 / 16,300  | 1.2 s  | 230 s |
+| 16 | 128 | 858 / 24,400  | 4.1 s  | 240 s |
+
+Discovery improves up to 10. At 16 it does not improve further, while the load grows by about
+60 %.
+
+`RegTableDepth` is 18. The closest bucket covers 2^-17 of the key space and absorbs anything
+closer, so it reaches `K_register` registrars only at about 1.3 million nodes, and the depth does
+not limit placement at the current network size. A smaller depth merges the registrars nearest
+the identifier into one bucket, which lowers the peak load but leaves rare services harder to
+find. In one 50,000-node simulation with 1,000 services of Zipf-distributed size, a depth of 10
+cut the REGTOPIC requests received by the busiest registrar from 53,777 to 25,894. It raised t90
+for services with fewer than 10 advertisers from 0.96 s to 15.9 s, and for 10 to 99 advertisers
+from 0.96 s to 2.5 s. Recall did not change.
+
+`RegStandbyLimit` is 20, enough candidates to replace a full bucket twice. It keeps the state of
+one bucket to 30 registrars. No measurement supports the exact value.
+
+`RegSenders` is 4, so that a ticket retry rarely waits for a timeout to a dead registrar to
+finish. `RegLoopMinPeriod` keeps the registration loop from spinning when the local node table is
+nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
+`RegAttemptBudget` is `1.5 * E`: after `E` every advertisement in the cache has been replaced, and
+the extra half lifetime keeps a quote close to `E` from ending the attempt. No measurement
+supports these four values.
+
+### Search Table and Pacing
+
+`SearchTableDepth` is 18, the same as the advertise table, so that a bucket covers the same part
+of the key space in both. `SearchBucketSize` is 8, which keeps one search to at most 144 candidate
+registrars. Results are not sensitive to the shape of this table: in a 30,000-node simulation with
+a yield floor of 4, 32 nodes per bucket instead of 16 and 14 buckets instead of 10 changed
+discovery time, total queries and the load on the busiest registrar by about 2 % or less. Eight
+has not been compared with larger values at the current parameters.
+
+`SearchYieldWindow` is 4 and `SearchMinSamples` is 2. A single response, which may come from a
+hostile registrar, cannot move the search, and four samples keep it reacting within a few queries.
+A search sends one query at a time, so that each sample can steer the next query. No measurement
+supports these two values.
+
+`SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at most
+`ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is 8: in
+the simulation above, 16 auxiliary ENRs per response made no measurable difference.
+
+`SearchPassGap` is 2 s, the shortest spacing of passes, and only passes that find something new
+stay at that spacing. `SearchPassQueries` bounds one pass. `SearchMixWait` bounds how long a
+result can wait when too few registrars have answered. A search that reaches `SearchFilterSize`
+forgets its oldest entries and may receive those advertisers again. No measurement supports these
+four values.
+
 ## TopDisc Security Considerations
 
 The following security considerations apply to TopDisc.
