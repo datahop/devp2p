@@ -223,7 +223,7 @@ SHOULD return at most one ENR of a node `n` that meets all of these conditions:
 - `logdistance(topic, n) = d`. The distance is measured from `topic`, not from the
   recipient's node ID as in FINDNODE.
 - The ENR advertises a supported `td` version.
-- The node's address passes the [relay rule] with respect to the requester's address.
+- The node's endpoint address is [public].
 
 When several nodes qualify for a distance, the recipient picks one at random. A distance
 with no such node contributes no ENR. An entry that is `0` or above `256` is ignored, a
@@ -289,9 +289,8 @@ presented before its window.
 
 The registrar MUST reject the request if `ENR` is not a valid node record, if its node ID
 is not the sender's, if it holds no IP address of the packet's address family, if that IP
-address differs from the packet's source IP address, or if it holds an IP address of the
-other family that is not publicly routable (see the [relay rule] section for address
-classes). Only IP addresses are compared: the UDP port is ignored. Discoverers dial the
+address differs from the packet's source IP address, or if it holds an IP address that
+is not [public]. Only IP addresses are compared: the UDP port is ignored. Discoverers dial the
 advertised record, not the packet source, so the record's addresses must be ones the
 registrar has seen or that can be reached. An `ENR` that does not decode as a record makes
 the message undecodable and it is not answered; a decoded `ENR` that fails signature
@@ -414,6 +413,6 @@ A collection of test vectors for this specification can be found at
 [theory section on parameters]: ./discv5-theory.md#parameters
 [theory section on auxiliary ENRs]: ./discv5-theory.md#auxiliary-enr-selection
 [theory section on service tables]: ./discv5-theory.md#service-tables
-[relay rule]: ./discv5-theory.md#address-classes-and-relaying
+[public]: ./discv5-theory.md#public-addresses
 [EIP-778]: ../enr.md
 [discv5 wire test vectors]: ./discv5-wire-test-vectors.md

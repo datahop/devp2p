@@ -1156,13 +1156,6 @@ which groups addresses far more coarsely than any single allocation. The IP simi
 considers only prefix lengths `k` with `2^k <= N`, which is at most `9` bits with `C = 1,000`.
 Two IPv6 addresses are therefore compared only on their first `9` bits.
 
-### LAN Addresses
-
-LAN addresses are exempt from the `/24` limits and are not scored by the IP similarity tree. A
-registrar admits an advertisement only if its ENR address equals the packet source, so a LAN
-address is accepted only from a node on the registrar's own network. In a deployment on one
-network, such as a test network, these rules then give no address diversity at all.
-
 ### Unverified Auxiliary ENRs
 
 A registrar returns auxiliary ENRs from its ordinary node table without checking that the
