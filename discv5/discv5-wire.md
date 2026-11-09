@@ -210,11 +210,26 @@ allowed maximum for `total`. If exceeded, additional responses may be ignored.
 When handling NODES as a response to FINDNODE, the recipient should verify that the
 received nodes match the requested distances.
 
-When NODES appears as a response to REGTOPIC or TOPICQUERY, it carries auxiliary ENRs
-selected for the requested topic from the responder's ordinary node table (see the
-[theory section on auxiliary ENRs]). These ENRs are routing information for the requester to
-populate or refresh its own service table `B(s)`. They are not themselves topic registrants;
-the actual registered nodes are returned via TOPICNODES.
+When NODES appears as a response to REGTOPIC or TOPICQUERY, it carries auxiliary ENRs:
+candidate registrars that the requester can add to its service table `B(s)`. They come from
+the responder's ordinary node table, not from its ad cache, so an auxiliary ENR says nothing
+about whether that node advertises `topic`. The advertisers registered for `topic` are
+returned in TOPICNODES.
+
+For each entry `d` in the request's `topic-distance` list, in list order, the responder
+SHOULD return at most one ENR of a node `n` that meets all of these conditions:
+
+- `logdistance(topic, n) = d`. The distance is measured from `topic`, not from the
+  responder's node ID as in FINDNODE.
+- The ENR advertises a supported `td` version.
+- The node's address may be relayed to the requester, under the same rule as NODES
+  responses to FINDNODE.
+
+When several nodes qualify for a distance, the responder picks one at random. A distance
+with no such node contributes no ENR. A responder that caps the number of auxiliary ENRs
+serves the earliest listed distances first; by default it serves the first 8 distances, so
+it returns at most 8 ENRs. Unlike FINDNODE, the responder need not have verified that the
+node is alive. See the [theory section on auxiliary ENRs].
 
 ### TALKREQ Request (0x05)
 
