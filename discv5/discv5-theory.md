@@ -300,7 +300,7 @@ procedure on another, closer node.
 
 # Topic-based Service Discovery
 
-Topic-based discovery (**TopDisc**), referred to as **DISC-NG** in the accompanying academic paper [DISC-NG paper], extends Discovery v5 with a mechanism to discover nodes according to their provided services (topics). Nodes advertise participation in a service through registration operations, and other nodes discover those advertisements through lookup operations, while reusing the existing Node Table and ENR mechanisms.
+Topic-based discovery (**TopDisc**, [DISC-NG paper]) extends Discovery v5 with a mechanism to discover nodes according to their provided services (topics). Nodes advertise participation in a service through registration operations, and other nodes discover those advertisements through lookup operations, while reusing the existing Node Table and ENR mechanisms.
 
 In this document *service* and *topic* name the same thing: the `topic` field of a wire message
 carries the service identifier `s`. A node answering a [REGTOPIC] or [TOPICQUERY] request is a
