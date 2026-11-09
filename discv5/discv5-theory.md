@@ -315,6 +315,12 @@ uses the TopDisc-capable nodes it finds there to fill its service tables. A node
 for ordinary node discovery while it is unusable for TopDisc; see
 [TopDisc Liveness and Temporary Exclusion](#topdisc-liveness-and-temporary-exclusion).
 
+TopDisc requires no change to nodes that do not implement it. `td` is an ordinary ENR entry, so
+every Discovery v5 node stores it and returns it in [NODES] responses as part of the signed record.
+A TopDisc-capable node therefore finds TopDisc-capable peers with unmodified Discovery v5 lookups,
+through any node, by reading `td` in the ENRs it learns. TopDisc requests are sent only to nodes
+with a supported `td`, so other nodes never receive them.
+
 ## ENR Capability
 
 A node indicates support for service discovery messages by including the [td ENR entry] in its ENR.
