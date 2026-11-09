@@ -1285,7 +1285,7 @@ This section lists every TopDisc parameter. The status column gives the rule tha
 
 | Parameter             | Meaning                                                                       | Value                   | Status                  | Rationale                     |
 |-----------------------|-------------------------------------------------------------------------------|-------------------------|-------------------------|-------------------------------|
-| `E`                   | Advertisement lifetime; also the lifetime of the asked and failed sets        | `15 min`                | MUST                    | [Ad cache][r-ad-cache]        |
+| `E`                   | Advertisement lifetime; also the lifetime of the asked and failed sets        | `15 min`                | MUST                    | [Values][r-values]            |
 | `OverloadedTTL`       | How long an over-budget registrar stays in the advertiser's overloaded set    | `E`                     | Local policy            |                               |
 | `C`                   | Registrar ad cache capacity, a hard limit                                     | `5,000` (provisional)   | Local policy            | [Ad cache][r-ad-cache]        |
 | `δ`                   | Registration window after a ticket's waiting time                             | `5 sec`                 | MUST                    | [Answers][r-answer]           |
@@ -1406,3 +1406,4 @@ registrar-local (see [Tickets](#tickets)).
 [r-schedule]: ./discv5-rationale.md#why-schedule-registrations-per-bucket
 [r-passes]: ./discv5-rationale.md#why-search-in-passes
 [r-filter]: ./discv5-rationale.md#why-filter-and-mix-lookup-results
+[r-values]: ./discv5-rationale.md#why-these-parameter-values

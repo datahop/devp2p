@@ -590,11 +590,14 @@ yielding `upper` advertisements per query is about `log2(SearchYieldFloor / uppe
 farther out than the first bucket expected to reach the floor, so the search jumps there
 directly.
 
-The value of the floor matters less than having one. In a 10,000-node testbed run, a floor
-of 4 cut the maximum number of TOPICQUERY requests received by one registrar from 640,319
-with no floor to 16,710. In a 30,000-node simulation, floors of 2, 4 and 8 performed alike,
-with a maximum of 2,026 to 2,068 TOPICQUERY requests per registrar against 15,020 with no
-floor.
+A floor limits the load on registrars, and its value sets the speed of the search. In a
+10,000-node testbed run, a floor of 4 cut the maximum number of TOPICQUERY requests received by
+one registrar from 640,319 with no floor to 16,710. In a 30,000-node simulation of one large
+service, floors of 2 and 4 settled where a response carries about four advertisements and took
+1,330 s and 1,297 s to find 90 % of the service's providers. Floors of 8 and 12 took 377 s and
+352 s, against 401 s with no floor, with half of its queries. With a floor of 8 the busiest
+registrar received about 2,000 queries, against about 150,000 with no floor. `SearchYieldFloor`
+is 8, the lowest of these values that keeps the speed of a search with no floor.
 
 A yield sample from a fallback bucket moves the active bucket only in the direction that
 advertisement density does not already predict. Low yield farther out than the active bucket,
@@ -622,10 +625,12 @@ had no advertisers when the lookup reached that bucket. Starting again at the fa
 lets the lookup find advertisers that appear later.
 
 Passes that find nothing new are spaced out, doubling from `SearchPassGap` up to
-`SearchPassBackoff`. In a 30,000-node simulation, a 60 s cap cut the 99th-percentile number
-of TOPICQUERY requests received per registrar from 1,423 without back-off to 1,143. For
-topics with 10 to 99 providers, it left t90, the time until a searcher has found 90 % of its
-topic's providers, unchanged; a 300 s cap about doubled t90.
+`SearchPassBackoff`. In a 30,000-node simulation with late-joining advertisers, a 60 s cap cut
+the TOPICQUERY requests received by the busiest registrar from 2,806 without back-off to 565. A
+late joiner in a topic with fewer than 10 providers was found 0.6 s later at the median and
+10 s later at the 90th percentile. For topics with 10 to 99 providers, t90, the time until a
+searcher has found 90 % of its topic's providers, went from 321 s to 350 s; a 300 s cap raised
+it to 510 s.
 
 The discoverer stops sending queries while `SearchUnreadLimit` results wait unread. A caller
 that reads slowly then does not cause queries whose results it would not use.
@@ -925,7 +930,10 @@ During lookup, auxiliary candidates are requested for topic-distances
 corresponding to the active search bucket and nearby buckets with available capacity.
 With `SearchAuxRadius = 1`, this normally covers the active bucket and its immediate
 neighbours. This helps replenish registrar candidates near the part of the
-service-centred key space currently being searched.
+service-centred key space currently being searched. In a 30,000-node simulation with the
+service sizes of a discv5 crawl, this radius cut the total number of TOPICQUERY requests from
+35.4 million, with auxiliary ENRs requested for every bucket with free space, to 2.7 million.
+Every service with fewer than 10 providers was still found in full.
 
 ## Why Support Mixed Deployments?
 
@@ -940,6 +948,27 @@ still participate in ordinary node discovery.
 TopDisc-capable nodes advertise support in their ENR. This allows implementations to build
 service tables from ordinary node discovery state while selecting only nodes that can
 handle TopDisc messages.
+
+## Why These Parameter Values?
+
+The [parameters](./discv5-theory.md#parameters) are defaults. Where a measurement or a bound
+supports a value, this section gives it. Where none does, the section says so, and the value is
+a working default rather than an optimum.
+
+### Advertisement Lifetime
+
+`E` is 15 minutes. In a 24-hour crawl of the discv5 network, nodes left at 1.7 to 3.4 % per
+hour, depending on how long a silence counts as leaving. With continuous renewal, that leaves
+0.2 to 0.4 % of advertisement time pointing at a departed node at 15 minutes, against 0.8 to
+1.2 % at 60 minutes. A 5-minute lifetime would save under 0.3 percentage points and about triple
+renewal traffic. A 25,000-node run replaying this churn at 16 times the rate returned 45 of 87
+million results from nodes down longer than `E`.
+
+The value is not an optimum: 30 minutes also stays under 1 % across all nodes, at about half the
+renewal traffic.
+An [earlier evaluation](https://github.com/datahop/p2p-service-discovery/blob/b7f2324/doc/report_m4/reports/ad_lifetime.md)
+preferred a short lifetime because the network then stays easier for new nodes to register in,
+spreads discovered nodes better, and resists sybil and denial-of-service attacks better.
 
 ## TopDisc Security Considerations
 
