@@ -557,7 +557,12 @@ registrations in every bucket, while each bucket closer to the service identifie
 half as many registrars, so advertisements per registrar roughly double with each bucket
 inward. A bucket yielding `upper` advertisements per query is about `log2(SearchYieldFloor /
 upper)` buckets farther out than the first bucket expected to reach the floor, so the search
-jumps there directly.
+jumps there directly. Density grows toward the service identifier, so a reply from a fallback
+bucket moves the active bucket only when it contradicts that: low yield closer in, or sufficient
+yield farther out. A pass at the closest bucket that finds nothing restarts at the farthest
+bucket, so a lookup finds the first advertisers of a service that had none. Registrars are
+picked at random within a bucket so that discoverers of one service do not converge on the same
+registrars.
 
 A floor limits the load on registrars, and its value sets the speed of the search. In a
 10,000-node testbed run, a floor of 4 cut the maximum number of TOPICQUERY requests received by
@@ -589,8 +594,8 @@ s later at the 90th percentile. For topics with 10 to 99 providers, t90, the tim
 searcher has found 90 % of its topic's providers, went from 321 s to 350 s; a 300 s cap raised
 it to 510 s.
 
-The discoverer stops sending queries while `SearchUnreadLimit` results wait unread, so that a
-slow caller does not cause queries whose results it would not use.
+The discoverer stops sending queries while results wait unread, so that a slow caller does not
+cause queries whose results it would not use.
 
 ## Why Filter and Mix Lookup Results?
 
@@ -850,8 +855,9 @@ node table is centred on the local node ID, not on the topic identifier. It may 
 contain few nodes in buckets that are important for a particular topic. TopDisc responses
 can include auxiliary ENRs selected from the registrar's ordinary node table by distance to
 the topic. Advertisers and discoverers can use these ENRs to refine their local service
-tables. Returned ENRs are auxiliary routing information, not lookup results.
-Implementations must validate them and check TopDisc capability in the ENR before
+tables. Returned ENRs are auxiliary routing information, not lookup results. One ENR per
+listed distance spreads them across the requester's free buckets and stops a registrar from
+filling a response from one bucket. Implementations must validate them and check TopDisc capability in the ENR before
 inserting them into service tables.
 
 During lookup, auxiliary candidates are requested for the active search bucket and its
@@ -943,9 +949,11 @@ It raised t90 for services with fewer than 10 advertisers from 0.96 s to 15.9 s,
 `RegStandbyLimit` is 20, enough candidates to replace a full bucket twice, which keeps the
 state of one bucket to 30 registrars.
 
-`RegSenders` is 4, so that a ticket retry rarely waits for a timeout to a dead registrar to
-finish. `RegLoopMinPeriod` keeps the registration loop from spinning when the local node table
-is nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
+Some values are local to one node and do not affect other nodes, so the specification leaves
+them to the implementation. Go-ethereum sends registrations through 4 concurrent senders per
+service, so that a ticket retry rarely waits for a timeout to a dead registrar to finish. It
+re-reads its node table at most every 2 s when it has no candidates, which keeps the
+registration loop from spinning when the table is nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
 `RegAttemptBudget` is `1.5 * E`: the extra half lifetime keeps a quote close to `E` from ending
 the attempt.
 
@@ -965,13 +973,14 @@ queries. A search sends one query at a time, so that each sample can steer the n
 `SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at
 most `ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is
 8: in the 30,000-node table-shape simulation with a yield floor of 4, 16 auxiliary ENRs per
-response made no measurable difference. `RegAuxAccept` equals `AuxENRLimit`. `QueryAuxAccept`
-is 16.
+response made no measurable difference. Go-ethereum accepts up to 8 auxiliary ENRs per
+registration reply, equal to `AuxENRLimit`, and 16 per lookup reply.
 
 `SearchPassGap` is 2 s, the shortest spacing of passes. `SearchMixWait` bounds how long a
-result can wait when too few registrars have answered. A search that reaches `SearchFilterSize`
-forgets its oldest entries and may receive those advertisers again. `SearchUnreadLimit` equals
-`F_return`, one full response.
+result can wait when too few registrars have answered. Go-ethereum's result filter holds 50,000
+entries; a search that fills it forgets its oldest entries and may receive those advertisers
+again. Go-ethereum stops querying while 16 results, one full response of `F_return`, wait
+unread.
 
 ### Search IP Limits
 
