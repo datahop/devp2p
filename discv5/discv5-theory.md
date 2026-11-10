@@ -694,13 +694,13 @@ candidates. It is not added to the failed set.
 
 The advertiser schedules its requests as follows:
 
-- It SHOULD send requests through `RegSenders = 4` concurrent senders per service.
+- A ticket retry SHOULD NOT wait for a request to another registrar to finish.
 - When several buckets have a due attempt, the advertiser serves them in turn, one attempt per
   bucket, starting with the farthest bucket.
 - Within a bucket, a due ticket retry goes before a first contact; otherwise the attempt due first
   goes first.
-- The advertiser re-reads its ordinary node table at most once per `RegLoopMinPeriod = 2 sec` when
-  it has no usable candidates.
+- When it has no usable candidates, the advertiser re-reads its ordinary node table at a bounded
+  rate.
 
 ### Registration Procedure
 
@@ -734,8 +734,7 @@ Only a timeout before the [REGCONFIRMATION] counts as a liveness failure towards
 table. A rejection is an answer.
 
 After admission, the advertiser takes the advertisement's lifetime from the `wait-time` of the
-[REGCONFIRMATION]. The advertiser MAY cap the auxiliary ENRs it accepts per registration request;
-the cap is `RegAuxAccept = 8`.
+[REGCONFIRMATION]. The advertiser MAY cap the auxiliary ENRs it accepts per registration request.
 
 ### Renewal
 
@@ -897,8 +896,8 @@ delivered node, with its ENR sequence number, in a result filter for `E` after t
 node is recorded it is not delivered again, except once with an ENR whose sequence number is higher
 than the recorded one, which records the new number and restarts the entry's `E`. After that
 re-delivery the node is not delivered again until its entry expires. Within one pass,
-each node is delivered at most once. The filter capacity is `SearchFilterSize = 50,000` entries;
-when the filter is full, the entry that expires first is dropped.
+each node is delivered at most once. The filter has a bounded capacity; when it is full, the entry
+that expires first is dropped.
 
 The discoverer SHOULD mix results across registrars. Within a pass, results that pass the filter are
 queued per responding registrar. Release starts once `SearchMixRegistrars = 10` registrars have
@@ -911,8 +910,8 @@ registrars is delivered once, with the ENR that has the highest sequence number.
 the discoverer sends no further query in it and releases every queued result in the same rounds, and
 the next pass starts after these results are read.
 
-The discoverer SHOULD NOT send a new query while `SearchUnreadLimit = 16` or more released results
-wait unread by the caller, and resumes querying when the caller reads.
+The discoverer SHOULD stop sending queries while released results wait unread by the caller beyond
+a local limit, and resume when the caller reads.
 
 ### Lookup Responses
 
@@ -947,8 +946,7 @@ An ENR learned through lookup is eligible for insertion into the search table on
 The per-bucket `/24` limit holds within one pass. A registrar that answered keeps its prefix slot for the rest of the pass; a registrar whose query
 failed releases it.
 
-A discoverer MAY cap the auxiliary ENRs it accepts per lookup request; the cap is
-`QueryAuxAccept = 16`. From a single reply, at most one candidate is admitted into any given search
+A discoverer MAY cap the auxiliary ENRs it accepts per lookup request. From a single reply, at most one candidate is admitted into any given search
 bucket.
 
 ## Parameters
@@ -996,7 +994,7 @@ the request fails or times out, or `RegRespLimit` packets of any type have arriv
 which fails the attempt if none was the [REGCONFIRMATION]. A discoverer waits for at most
 `QueryRespLimit = 16` packets of any type for a [TOPICQUERY], even if `total` is higher, treats what
 arrived as a partial response if the capped `total` was not reached, and keeps at most `F_return`
-advertisements and `QueryAuxAccept` auxiliary ENRs. A registrar sends at most `ENRsPerPacket = 3`
+advertisements and as many auxiliary ENRs as its cap allows. A registrar sends at most `ENRsPerPacket = 3`
 ENRs per [NODES] or [TOPICNODES] response. A registrar SHOULD send the [REGCONFIRMATION] first and
 SHOULD NOT announce a `total` above `RegRespLimit`.
 

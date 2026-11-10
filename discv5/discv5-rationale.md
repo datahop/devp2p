@@ -594,8 +594,8 @@ s later at the 90th percentile. For topics with 10 to 99 providers, t90, the tim
 searcher has found 90 % of its topic's providers, went from 321 s to 350 s; a 300 s cap raised
 it to 510 s.
 
-The discoverer stops sending queries while `SearchUnreadLimit` results wait unread, so that a
-slow caller does not cause queries whose results it would not use.
+The discoverer stops sending queries while results wait unread, so that a slow caller does not
+cause queries whose results it would not use.
 
 ## Why Filter and Mix Lookup Results?
 
@@ -949,9 +949,11 @@ It raised t90 for services with fewer than 10 advertisers from 0.96 s to 15.9 s,
 `RegStandbyLimit` is 20, enough candidates to replace a full bucket twice, which keeps the
 state of one bucket to 30 registrars.
 
-`RegSenders` is 4, so that a ticket retry rarely waits for a timeout to a dead registrar to
-finish. `RegLoopMinPeriod` keeps the registration loop from spinning when the local node table
-is nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
+Some values are local to one node and do not affect other nodes, so the specification leaves
+them to the implementation. Go-ethereum sends registrations through 4 concurrent senders per
+service, so that a ticket retry rarely waits for a timeout to a dead registrar to finish. It
+re-reads its node table at most every 2 s when it has no candidates, which keeps the
+registration loop from spinning when the table is nearly empty. `OverloadedTTL` is `E` because the registrar's cache has then turned over.
 `RegAttemptBudget` is `1.5 * E`: the extra half lifetime keeps a quote close to `E` from ending
 the attempt.
 
@@ -971,13 +973,14 @@ queries. A search sends one query at a time, so that each sample can steer the n
 `SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at
 most `ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is
 8: in the 30,000-node table-shape simulation with a yield floor of 4, 16 auxiliary ENRs per
-response made no measurable difference. `RegAuxAccept` equals `AuxENRLimit`. `QueryAuxAccept`
-is 16.
+response made no measurable difference. Go-ethereum accepts up to 8 auxiliary ENRs per
+registration reply, equal to `AuxENRLimit`, and 16 per lookup reply.
 
 `SearchPassGap` is 2 s, the shortest spacing of passes. `SearchMixWait` bounds how long a
-result can wait when too few registrars have answered. A search that reaches `SearchFilterSize`
-forgets its oldest entries and may receive those advertisers again. `SearchUnreadLimit` equals
-`F_return`, one full response.
+result can wait when too few registrars have answered. Go-ethereum's result filter holds 50,000
+entries; a search that fills it forgets its oldest entries and may receive those advertisers
+again. Go-ethereum stops querying while 16 results, one full response of `F_return`, wait
+unread.
 
 ### Search IP Limits
 
