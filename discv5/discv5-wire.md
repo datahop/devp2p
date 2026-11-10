@@ -289,9 +289,7 @@ presented before its window.
 The registrar MUST reject the request if `ENR` is not a valid node record, if its node ID
 is not the sender's, if it holds no IP address of the packet's address family, if that IP
 address differs from the packet's source IP address, or if it holds an IP address of the
-other family that is unspecified, a special-purpose address or a [LAN address]. Only IP addresses are compared: the UDP port is ignored. Discoverers dial the
-advertised record, not the packet source, so the record's addresses must be ones the
-registrar has seen or that can be reached. An `ENR` that does not decode as a record makes
+other family that is unspecified, a special-purpose address or a [LAN address]. Only IP addresses are compared: the UDP port is ignored. An `ENR` that does not decode as a record makes
 the message undecodable and it is not answered; a decoded `ENR` that fails signature
 verification is rejected.
 

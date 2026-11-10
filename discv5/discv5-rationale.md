@@ -557,7 +557,12 @@ registrations in every bucket, while each bucket closer to the service identifie
 half as many registrars, so advertisements per registrar roughly double with each bucket
 inward. A bucket yielding `upper` advertisements per query is about `log2(SearchYieldFloor /
 upper)` buckets farther out than the first bucket expected to reach the floor, so the search
-jumps there directly.
+jumps there directly. Density grows toward the service identifier, so a reply from a fallback
+bucket moves the active bucket only when it contradicts that: low yield closer in, or sufficient
+yield farther out. A pass at the closest bucket that finds nothing restarts at the farthest
+bucket, so a lookup finds the first advertisers of a service that had none. Registrars are
+picked at random within a bucket so that discoverers of one service do not converge on the same
+registrars.
 
 A floor limits the load on registrars, and its value sets the speed of the search. In a
 10,000-node testbed run, a floor of 4 cut the maximum number of TOPICQUERY requests received by
@@ -850,8 +855,9 @@ node table is centred on the local node ID, not on the topic identifier. It may 
 contain few nodes in buckets that are important for a particular topic. TopDisc responses
 can include auxiliary ENRs selected from the registrar's ordinary node table by distance to
 the topic. Advertisers and discoverers can use these ENRs to refine their local service
-tables. Returned ENRs are auxiliary routing information, not lookup results.
-Implementations must validate them and check TopDisc capability in the ENR before
+tables. Returned ENRs are auxiliary routing information, not lookup results. One ENR per
+listed distance spreads them across the requester's free buckets and stops a registrar from
+filling a response from one bucket. Implementations must validate them and check TopDisc capability in the ENR before
 inserting them into service tables.
 
 During lookup, auxiliary candidates are requested for the active search bucket and its
