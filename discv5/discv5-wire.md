@@ -395,8 +395,8 @@ sender's service table is carried separately via NODES responses.
 
 ## Test Vectors
 
-A collection of test vectors for this specification can be found at
-[discv5 wire test vectors].
+A collection of test vectors for this specification, including the TopDisc messages, can be
+found at [discv5 wire test vectors].
 
 [handshake section]: ./discv5-theory.md#handshake-steps
 [theory section on tickets]: ./discv5-theory.md#tickets
