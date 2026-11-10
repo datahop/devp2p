@@ -1003,11 +1003,6 @@ still answers the request. A topic-distance list of more than `MaxTopicDistances
 invalid and need not be answered. A node does not decode a [TOPICNODES] holding more than
 `MaxTopicNodes = 16` ENRs.
 
-### References
-
-- [DISC-NG paper]
-- [RFC 5869]
-
 [DISC-NG paper]: https://doi.org/10.1109/EuroSP60621.2024.00019
 [RFC 5869]: https://www.rfc-editor.org/rfc/rfc5869
 [FINDNODE]: ./discv5-wire.md#findnode-request-0x03
