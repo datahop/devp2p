@@ -388,8 +388,7 @@ The `/24` limit applies to the node's **endpoint address**, with the same prefix
 families. The endpoint address is the more global of the IPv4 and IPv6 addresses in its ENR, in the
 order unspecified, loopback, link-local, private, any other address, or the IPv4 address if both are
 equally global. Multicast addresses are ignored. [LAN addresses](#ip-similarity-tree) are exempt from
-the limit. The node's UDP port is the `udp` value for an IPv4 endpoint address, and the `udp6` value,
-or `udp` if there is none, for an IPv6 endpoint address.
+the limit.
 
 ### Bootstrapping from Ordinary Node Discovery
 
@@ -880,9 +879,7 @@ is not idle resets the spacing to `SearchPassGap`. The discoverer SHOULD back of
 
 The discoverer validates advertisements as it validates auxiliary ENRs. The ENR must be valid. Its
 endpoint address must pass the [relay rule](#auxiliary-enr-selection) and any configured network
-restrictions.
-Its UDP port must be greater than `MinUDPPort = 1024`, so port `1024` itself is rejected. An
-advertisement whose node ID was already returned by an earlier advertisement of the same query, in
+restrictions. An advertisement whose node ID was already returned by an earlier advertisement of the same query, in
 the same or another [TOPICNODES] packet, is dropped; this de-duplication is separate from that of
 the auxiliary ENRs. The discoverer then discards advertisements whose ENR does not advertise a
 supported `td` version, drops an advertisement of itself, and extracts the advertised ENRs.
@@ -936,12 +933,11 @@ An ENR learned through lookup is eligible for insertion into the search table on
    [Registrar Selection](#registrar-selection));
 4. the node's endpoint address passes the [relay rule](#auxiliary-enr-selection) and any configured
    network restrictions;
-5. the node's UDP port is greater than `MinUDPPort`;
-6. the node is not the discoverer itself or a duplicate candidate, has not answered or failed
+5. the node is not the discoverer itself or a duplicate candidate, has not answered or failed
    a query in the current pass, and is not in the lookup's asked set (such a node becomes a
    spare, see [Registrar Selection](#registrar-selection));
-7. the destination search bucket has space; and
-8. the bucket's per-`/24` limit is not exceeded.
+6. the destination search bucket has space; and
+7. the bucket's per-`/24` limit is not exceeded.
 
 The per-bucket `/24` limit holds within one pass. A registrar that answered keeps its prefix slot for the rest of the pass; a registrar whose query
 failed releases it.
