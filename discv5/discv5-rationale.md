@@ -1013,8 +1013,7 @@ share the 16. The caps keep a registrar from holding a request open by announcin
 `MaxTopicNodes` is 16, the FINDNODE result limit and `F_return`.
 
 `RespTimeout` is 700 ms, the timeout of other discv5 requests. A timeout counts against the
-node, so a shorter value would penalise slow but working registrars. `MinUDPPort` is 1024: discovery nodes do not use privileged ports,
-and dropping such records keeps a response from directing a node's packets at system services.
+node, so a shorter value would penalise slow but working registrars.
 
 ### Ticket Bounds
 
