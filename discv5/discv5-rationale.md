@@ -565,9 +565,7 @@ picked at random within a bucket so that discoverers of one service do not conve
 registrars.
 
 A floor limits the load on registrars, and its value sets the speed of the search. In a
-10,000-node testbed run, a floor of 4 cut the maximum number of TOPICQUERY requests received by
-one registrar from 640,319 with no floor to 16,710. In a 30,000-node simulation of one large
-service, floors of 2 and 4 settled where a response carries about four advertisements and took
+30,000-node [simulation][sim-floor] of one large service, floors of 2 and 4 settled where a response carries about four advertisements and took
 1,330 s and 1,297 s to find 90 % of the service's providers. Floors of 8 and 12 took 377 s and
 352 s, against 401 s with no floor, with half of its queries. With a floor of 8 the busiest
 registrar received about 2,000 queries, against about 150,000 with no floor. `SearchYieldFloor`
@@ -587,7 +585,7 @@ keeps a dead node from being picked in every pass. A bucket whose queries all fa
 retry pass, so that a single dead registrar cannot hold the search at one distance.
 
 Passes that find nothing new are spaced out, doubling from `SearchPassGap` up to
-`SearchPassBackoff`. In a 30,000-node simulation with late-joining advertisers, a 60 s cap cut
+`SearchPassBackoff`. In a 30,000-node [simulation][sim-backoff] with late-joining advertisers, a 60 s cap cut
 the TOPICQUERY requests received by the busiest registrar from 2,806 without back-off to 565. A
 late joiner in a topic with fewer than 10 providers was found 0.6 s later at the median and 10
 s later at the 90th percentile. For topics with 10 to 99 providers, t90, the time until a
@@ -605,8 +603,9 @@ changes its ENR is delivered once more, so the caller learns the new record, but
 that an advertiser cannot reach the caller repeatedly by updating its record.
 
 Without mixing, a caller that stops after its first few results would depend on a single
-registrar, which a malicious registrar could fill with sybil advertisements. In simulation,
-mixing cut the share of searches whose first results were all sybils from 21 % to 0.15 %.
+registrar, which a malicious registrar could fill with sybil advertisements. In a 30,000-node
+[simulation][sim-mixer], mixing cut the share of searches whose first results were all sybils
+from 21.3 % to 0.15 %.
 Mixing does not remove the eclipse risk of a large `F_return`; see [Eclipse Risk and
 `F_return`](#eclipse-risk-and-f_return).
 
@@ -720,7 +719,7 @@ An advertiser cannot tell a silent registrar from a dead one. A request dropped 
 answer ends as a timeout: the registrar enters the failed set for `E` and takes a liveness
 failure in the advertiser's node table, and the advertiser loses a working registrar.
 
-In a 25,000-node run with churn and unreachable ("ghost") nodes, with registrars that answer
+In a 25,000-node [testbed run][tb-ghosts] with churn and unreachable ("ghost") nodes, with registrars that answer
 nothing to a ticket outside its window, TopDisc searchers found a median of 35.7 % of their
 topic's providers, against 72.3 % with plain discv5. In that run 96 % of the ticket retries
 arrived after the 5 s window and were dropped without an answer; these made up 76 % of all
@@ -862,8 +861,7 @@ inserting them into service tables.
 
 During lookup, auxiliary candidates are requested for the active search bucket and its
 immediate neighbours (`SearchAuxRadius = 1`), which replenishes candidates near the part of the
-key space being searched. In a 30,000-node simulation with the
-service sizes of a discv5 crawl, this radius cut the total number of TOPICQUERY requests from
+key space being searched. In a 30,000-node [simulation][sim-aux] with the service sizes of a discv5 crawl, this radius cut the total number of TOPICQUERY requests from
 35.4 million, with auxiliary ENRs requested for every bucket with free space, to 2.7 million.
 Every service with fewer than 10 providers was still found in full.
 
@@ -889,20 +887,20 @@ value rather than an optimum.
 
 ### Advertisement Lifetime
 
-`E` is 15 minutes. In a 24-hour crawl of the discv5 network, nodes left at 1.7 to 3.4 % per
+`E` is 15 minutes. In a 24-hour [crawl][tb-churn] of the discv5 network, nodes left at 1.7 to 3.4 % per
 hour, depending on how long a silence counts as leaving. With continuous renewal, that leaves
 0.2 to 0.4 % of advertisement time pointing at a departed node at 15 minutes, against 0.8 to
 1.2 % at 60 minutes. A 5-minute lifetime would save under 0.3 percentage points and about triple
-renewal traffic. A 25,000-node run replaying this churn at 16 times the rate returned 45 of 87
-million results from nodes down longer than `E`.
+renewal traffic. In a 25,000-node [testbed run][tb-dead] with continuous churn, 59 of 85.7 million
+search results pointed at nodes that had been down longer than `E`.
 
 The value is not an optimum: 30 minutes also stays under 1 % across all nodes, at about half the
 renewal traffic. [DISC-NG] uses the same 15 minutes, chosen with the devp2p developers.
 
 ### Ad Cache and Waiting Times
 
-`C` is 1,000. A 25,000-node simulation with the service sizes of a discv5 crawl and no
-attackers compared 500, 1,000, 2,500 and 5,000, averaged over three runs. From 5,000 to 1,000,
+`C` is 1,000. A 25,000-node [simulation][sim-capacity] with the service sizes of a discv5 crawl
+and no attackers compared 500, 1,000, 2,500 and 5,000, averaged over three runs. From 5,000 to 1,000,
 the advertisements held by the busiest registrar fell from 1,011 to 233 and its REGTOPIC
 requests from 68,800 to 50,500. Recall stayed at 100 %, and t90 for services with 1,000 or more
 advertisers rose from 109 s to 116 s. Advertisers abandoned a registrar more often, 131 times
@@ -922,29 +920,29 @@ much of the key space, so about half as many registrars take the same `K_registe
 advertisements. [DISC-NG] states the same trade-off: a larger `K_register` makes an advertiser
 easier to find, at the cost of more communication and storage.
 
-`K_register` is 10. The table gives a 50,000-node simulation with the service sizes of a discv5
-crawl and no attackers, averaged over two runs. Registrars per advertiser is the median number
+`K_register` is 10. The table gives a 50,000-node [simulation][sim-regtable] with the service
+sizes of a discv5 crawl, `C` of 1,000 and no attackers, averaged over two runs. Registrars per advertiser is the median number
 of registrars holding one advertiser's advertisements. Discovery time is t90 for services with
 1,000 or more advertisers.
 
 | `K_register` | Registrars per advertiser | REGTOPIC received per registrar, median / 99th percentile | Median admission wait | Discovery time |
 |---:|---:|---:|---:|---:|
-| 3  | 31  | 143 / 4,500   | 0.06 s | 369 s |
-| 5  | 48  | 248 / 7,500   | 0.18 s | 305 s |
-| 10 | 87  | 525 / 16,300  | 1.2 s  | 230 s |
-| 16 | 128 | 858 / 24,400  | 4.1 s  | 240 s |
+| 3  | 24 | 140 / 5,000  | 0.06 s | 396 s |
+| 5  | 36 | 242 / 7,900  | 0.18 s | 328 s |
+| 10 | 60 | 512 / 15,300 | 1.2 s  | 246 s |
+| 16 | 82 | 844 / 22,700 | 4.3 s  | 232 s |
 
-Discovery improves up to 10. At 16 it does not improve further, while the load grows by about
-60 %.
+Discovery improves most up to 10. At 16 it improves by a further 6 %, while the load grows by
+about 65 %.
 
 `RegTableDepth` is 18. The closest bucket covers 2^-17 of the key space and absorbs anything
 closer, so it reaches `K_register` registrars only at about 1.3 million nodes, and the depth
 does not limit placement at the current network size. A smaller depth merges the registrars
 nearest the identifier into one bucket, which lowers the peak load but leaves rare services
-harder to find. In one 50,000-node simulation with 1,000 services of Zipf-distributed size, a
-depth of 10 cut the REGTOPIC requests received by the busiest registrar from 53,777 to 25,894.
-It raised t90 for services with fewer than 10 advertisers from 0.96 s to 15.9 s, and for 10 to
-99 advertisers from 0.96 s to 2.5 s. Recall did not change.
+harder to find. In one 50,000-node [simulation][sim-depth] with 1,000 services of
+Zipf-distributed size, a depth of 10 cut the REGTOPIC requests received by the busiest
+registrar from 44,314 to 25,652. It raised t90 for services with fewer than 10 advertisers from
+0.96 s to 23.9 s, and for 10 to 99 advertisers from 0.96 s to 4.7 s. Recall did not change.
 
 `RegStandbyLimit` is 20, enough candidates to replace a full bucket twice, which keeps the
 state of one bucket to 30 registrars.
@@ -961,7 +959,8 @@ the attempt.
 
 `SearchTableDepth` is 18, the same as the registration table, so that a bucket covers the same
 part of the key space in both. `SearchBucketSize` is 8, which keeps at most 144 candidates held
-at once. Results are not sensitive to the shape of this table: in a 30,000-node simulation with
+at once. Results are not sensitive to the shape of this table: in a 30,000-node
+[simulation][sim-shape] with
 a yield floor of 4, 32 nodes per bucket instead of 16 and 14 buckets instead of 10 changed
 discovery time, total queries and the load on the busiest registrar by about 2 % or less. Eight
 has not been compared with larger values at the current parameters.
@@ -972,7 +971,7 @@ queries. A search sends one query at a time, so that each sample can steer the n
 
 `SearchMaxJump` is 4. With `SearchYieldFloor` at 8, a non-zero yield moves the search by at
 most `ceil(log2(8)) = 3` buckets, so the limit applies only to an empty yield. `AuxENRLimit` is
-8: in the 30,000-node table-shape simulation with a yield floor of 4, 16 auxiliary ENRs per
+8: in the 30,000-node table-shape [simulation][sim-shape] with a yield floor of 4, 16 auxiliary ENRs per
 response made no measurable difference. Go-ethereum accepts up to 8 auxiliary ENRs per
 registration reply, equal to `AuxENRLimit`, and 16 per lookup reply.
 
@@ -989,13 +988,14 @@ A search bucket allows 2 registrars per /24, and `SearchSubnetLimit`
 are those of the ordinary node table, which allows 2 per /24 in a bucket and 10 in the table.
 
 A per-bucket limit alone has no memory: the search table is rebuilt every pass, so an attacker
-with a few /24 networks can present new node IDs on each pass. In a 30,000-node simulation with
+with a few /24 networks can present new node IDs on each pass. In a 30,000-node
+[simulation][sim-iplimits] with
 honest addresses from a discv5 crawl and an attacker on two /24 networks answering with useless
 advertisements, the per-bucket limit alone left 92.1 % of queries going to sybils. With the limit
 of 10 per search, 0.63 % went to sybils, and all 918 searchers reached 90 % of the service's
 providers, with a mean t90 of 132 s. Limits of 1 and 2 per search also stop this attack, with
-0.07 % and 0.13 %, but slow honest searches, to a mean t90 of 273 s and 175 s, against 124 s with
-10. The result comes from one run. The attacker's allowance grows by 10 with each further /24.
+0.07 % and 0.13 %, but slow honest searches with no attack to a mean t90 of 273 s and 175 s,
+against 124 s with 10. The result comes from one run. The attacker's allowance grows by 10 with each further /24.
 
 The registration table allows only one registrar per /24 in a bucket because a place in it
 holds an advertisement for a whole lifetime, while a place in a search bucket costs one query.
@@ -1064,12 +1064,12 @@ how many entries a single registrar can place in one bucket.
 ### Eclipse Risk and `F_return`
 
 A large `F_return` raises the eclipse risk when one registrar can fill a caller's first results.
-In a 30,000-node simulation with 10 % sybil nodes and no result mixing, an `F_return` of 16
-eclipsed 10.3 % of searchers, against 0.2 % with an `F_return` of 6.
+In a 30,000-node [simulation][sim-eclipse] with 10 % sybil nodes and no result mixing, an
+`F_return` of 16 eclipsed 10.4 % of searchers, against 0.3 % with an `F_return` of 6.
 
 `F_return` is 16, the same limit discv5 applies to a FINDNODE result, so a TOPICNODES answer is
 no larger than an ordinary NODES answer. With [mixing](#why-filter-and-mix-lookup-results) the
-value is safe. In a 30,000-node simulation of one large service, an `F_return` of 6
+value is safe. In a 30,000-node [simulation][sim-cap] of one large service, an `F_return` of 6
 raised t90 from 348 s to 1,006 s and lowered recall from 100 % to 97.9 %.
 
 # References
@@ -1150,3 +1150,17 @@ raised t90 from 348 s to 1,006 s and lowered recall from 100 % to 97.9 %.
 [FINDNODE]: ./discv5-wire.md#findnode-request-0x03
 
 [DISC-NG]: https://doi.org/10.1109/EuroSP60621.2024.00019
+[sim-floor]: https://github.com/datahop/topdisc-sim/blob/main/docs/adaptive-search-parameters.md#32-yield-floor
+[sim-shape]: https://github.com/datahop/topdisc-sim/blob/main/docs/adaptive-search-parameters.md#33-table-shape
+[sim-aux]: https://github.com/datahop/topdisc-sim/blob/main/docs/adaptive-search-parameters.md#34-aux-radius
+[sim-backoff]: https://github.com/datahop/topdisc-sim/blob/main/docs/adaptive-search-parameters.md#35-pass-back-off
+[sim-mixer]: https://github.com/datahop/topdisc-sim/blob/main/docs/adaptive-search-parameters.md#37-result-mixer
+[sim-eclipse]: https://github.com/datahop/topdisc-sim/blob/main/docs/security.md#one-topic-eclipse-rate-against-the-sybil-population
+[sim-cap]: https://github.com/datahop/topdisc-sim/blob/main/docs/security.md#what-the-reply-cap-costs
+[tb-churn]: https://github.com/datahop/topdisc-testbed/blob/main/docs/churn-analysis.md#8-what-topdisc-takes-from-it
+[tb-dead]: https://github.com/datahop/topdisc-testbed/blob/main/docs/final-report/README.md#dead-nodes-in-search-results
+[sim-capacity]: https://github.com/datahop/topdisc-sim/blob/main/docs/capacity.md#results
+[sim-regtable]: https://github.com/datahop/topdisc-sim/blob/main/docs/registration-table.md#k_register
+[sim-depth]: https://github.com/datahop/topdisc-sim/blob/main/docs/registration-table.md#depth
+[sim-iplimits]: https://github.com/datahop/topdisc-sim/blob/main/docs/security.md#ip-limits-per-search
+[tb-ghosts]: https://github.com/datahop/topdisc-testbed/blob/main/docs/aws-25k-ghosts-2026-10-25.md
